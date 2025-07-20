@@ -1,7 +1,8 @@
+import os
 import requests
 from operator import itemgetter
 
-GRAPHQL_URL = "https://api.github.com/graphql"
+GRAPHQL_URL = os.getenv("GITHUB_GRAPHQL_URL","https://api.github.com/graphql")
 
 def _run_graphql_query(token: str, query: str, variables: dict = None):
     """A helper function to run a GraphQL query with variables."""
@@ -220,7 +221,7 @@ def get_bulk_data(token: str, repo_names: list[str], commit_limit: int = 100, pr
             all_merged_prs.append({
                 "repo": repo_name, "repo_url": repo_url,
                 "pr_number": pr_node["number"], "title": pr_node["title"],
-                "author": pr_node.get("author", {}).get("login", "n/a"),
+                "author": pr_node["author"]["login"] if pr_node.get("author") and pr_node["author"] else "n/a",
                 "date": pr_node["mergedAt"], "url": pr_node["url"]
             })
 

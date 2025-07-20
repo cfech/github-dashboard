@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import json
+import time # Import the time module
 from dotenv import load_dotenv
 from operator import itemgetter
 
@@ -26,7 +27,13 @@ def load_github_data(token):
         st.error("GITHUB_TOKEN environment variable not set.")
         return None, None, None
 
+    if DEBUG_MODE:
+        print("Running in DEBUG_MODE. Data will be loaded from/saved to local file.")
+
+    start_time = time.time()
     repo_names = github_service.get_all_accessible_repo_names(token, specific_org_logins=TARGET_ORGANIZATIONS)
+    end_repo_fetch_time = time.time()
+    print(f"Time to fetch all accessible repository names: {end_repo_fetch_time - start_time:.2f} seconds")
 
     # Apply REPO_FETCH_LIMIT if set
     if REPO_FETCH_LIMIT is not None and len(repo_names) > REPO_FETCH_LIMIT:
@@ -35,7 +42,11 @@ def load_github_data(token):
     else:
         repo_names_for_bulk_fetch = repo_names
 
+    start_bulk_fetch_time = time.time()
     commits, open_prs, merged_prs = github_service.get_bulk_data(token, repo_names_for_bulk_fetch)
+    end_bulk_fetch_time = time.time()
+    print(f"Time to fetch bulk data for {len(repo_names_for_bulk_fetch)} repositories: {end_bulk_fetch_time - start_bulk_fetch_time:.2f} seconds")
+    print(f"Total API call time: {end_bulk_fetch_time - start_time:.2f} seconds")
 
     if not DEBUG_MODE:
         with open(DEBUG_DATA_FILE, 'w') as f:
