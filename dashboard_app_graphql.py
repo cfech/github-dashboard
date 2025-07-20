@@ -8,7 +8,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from operator import itemgetter
 
-from .github_service_graphql import get_all_accessible_repo_names, get_bulk_data
+from github_service_graphql import get_all_accessible_repo_names, get_bulk_data
 
 load_dotenv()
 
@@ -19,7 +19,7 @@ st.set_page_config(page_title="GitHub Dashboard (GraphQL)", page_icon="⚡", lay
 # --- App Constants ---
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
-DEBUG_MODE = True
+DEBUG_MODE = False
 TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
 REPO_FETCH_LIMIT = 25 # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
@@ -97,6 +97,15 @@ st.title("⚡ Personal GitHub Dashboard (GraphQL)")
 commits_data, open_prs_data, merged_prs_data, this_week_commits, this_week_prs = load_github_data(GITHUB_TOKEN)
 
 # --- UI Layout ---
+
+st.set_page_config(page_title="Page Title", layout="wide")
+
+st.markdown("""
+    <style>
+        .stAppToolbar {display:none;}
+    </style>
+""", unsafe_allow_html=True)
+
 
 # --- This Week's Activity ---
 st.header("This Week's Activity")

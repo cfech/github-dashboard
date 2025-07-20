@@ -1,12 +1,12 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from src.github_service_graphql import _run_graphql_query, _build_bulk_query, get_all_accessible_repo_names, \
+from github_service_graphql import _run_graphql_query, _build_bulk_query, get_all_accessible_repo_names, \
     get_bulk_data
 
 
 class TestGithubServiceGraphQL(unittest.TestCase):
 
-    @patch('src.github_service_graphql.requests.post')
+    @patch('github_service_graphql.requests.post')
     def test_run_graphql_query(self, mock_post):
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
@@ -16,7 +16,7 @@ class TestGithubServiceGraphQL(unittest.TestCase):
         response = _run_graphql_query("fake_token", "query")
         self.assertEqual(response, {"data": "test"})
 
-    @patch('src.github_service_graphql._run_graphql_query')
+    @patch('github_service_graphql._run_graphql_query')
     def test_get_all_accessible_repo_names(self, mock_run_query):
         mock_run_query.side_effect = [
             # Viewer repos
@@ -65,7 +65,7 @@ class TestGithubServiceGraphQL(unittest.TestCase):
         self.assertIn("history(first: 10)", query)
         self.assertIn("pullRequests(states: [OPEN], first: 5", query)
 
-    @patch('src.github_service_graphql._run_graphql_query')
+    @patch('github_service_graphql._run_graphql_query')
     def test_get_bulk_data(self, mock_run_query):
         mock_run_query.return_value = {
             "data": {

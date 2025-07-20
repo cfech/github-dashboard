@@ -28,7 +28,7 @@ Follow these steps to set up and run the application:
 
 1.  **Navigate to the `graphql` directory**:
     ```bash
-    cd /Users/connorfech/Desktop/code/github-dashboard/graphql
+    cd /Users/connorfech/Desktop/code/github-dashboard/
     ```
 
 2.  **Install Dependencies**:

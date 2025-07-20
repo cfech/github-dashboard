@@ -1,13 +1,13 @@
 import unittest
 from unittest.mock import patch
-import src.dashboard_app_graphql as dashboard_app
+import dashboard_app_graphql as dashboard_app
 
 class TestDashboardAppGraphQL(unittest.TestCase):
 
-    @patch('src.dashboard_app_graphql.get_all_accessible_repo_names')
-    @patch('src.dashboard_app_graphql.get_bulk_data')
-    @patch('src.dashboard_app_graphql.st')
-    @patch('src.dashboard_app_graphql.DEBUG_MODE', False)
+    @patch('dashboard_app_graphql.get_all_accessible_repo_names')
+    @patch('dashboard_app_graphql.get_bulk_data')
+    @patch('dashboard_app_graphql.st')
+    @patch('dashboard_app_graphql.DEBUG_MODE', False)
     def test_load_github_data(self, mock_st, mock_get_bulk_data, mock_get_all_accessible_repo_names):
         # Mock the github_service functions
         mock_get_all_accessible_repo_names.return_value = ['owner/repo1']
