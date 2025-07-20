@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import json
 from dotenv import load_dotenv
+from operator import itemgetter
 
 load_dotenv()
 import github_service_graphql as github_service
@@ -15,74 +16,165 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEBUG_DATA_FILE = "github_data.json"
 DEBUG_MODE = False
 
-# --- UI Sidebar ---
-st.sidebar.title("Settings")
-repo_limit = st.sidebar.number_input(
-    label="Number of Repos to Display", min_value=5, max_value=100, value=20, step=5,
-    help="The number of most recently updated repositories to fetch data for."
-)
-
 # --- Caching & Data Loading ---
-@st.cache_data(ttl=600)
-def load_github_data(token, limit, is_debug):
-    if is_debug:
-        st.sidebar.warning("Debug Mode is ON. Reading from local file.")
-        try:
-            with open(DEBUG_DATA_FILE, 'r') as f:
-                data = json.load(f)
-                return data['commits'], data['prs'], data['total_repo_count']
-        except FileNotFoundError:
-            st.sidebar.error(f"{DEBUG_DATA_FILE} not found. Set DEBUG_MODE to False to create it.")
-            return None, None, 0
-
+@st.cache_data(ttl=3600) # Cache for 1 hour
+def load_github_data(token):
+    """Fetches data from GitHub and optionally saves it for debugging."""
     if not token:
         st.error("GITHUB_TOKEN environment variable not set.")
-        return None, None, 0
+        return None, None, None
 
-    all_repo_names = github_service.get_all_accessible_repo_names(token)
-    repo_names_to_fetch = all_repo_names[:limit]
+    repo_names = github_service.get_all_accessible_repo_names(token)
+    commits, open_prs, merged_prs = github_service.get_bulk_data(token, repo_names)
 
-    # This single function now gets both commits and PRs
-    commits, prs = github_service.get_latest_commits_and_prs_bulk(token, repo_names_to_fetch, limit=5)
-    total_repo_count = len(all_repo_names)
+    if not DEBUG_MODE:
+        with open(DEBUG_DATA_FILE, 'w') as f:
+            json.dump({"commits": commits, "open_prs": open_prs, "merged_prs": merged_prs}, f, indent=4)
 
-    print("LIVE: Saving data to local file for future debugging.")
-    data_to_save = {"commits": commits, "prs": prs, "total_repo_count": total_repo_count}
-    with open(DEBUG_DATA_FILE, 'w') as f:
-        json.dump(data_to_save, f, indent=2)
-
-    return commits, prs, total_repo_count
+    return commits, open_prs, merged_prs
 
 # --- Main App ---
 st.title("⚡ Personal GitHub Dashboard (GraphQL)")
-commits_data, prs_data, total_repo_count = load_github_data(GITHUB_TOKEN, repo_limit, DEBUG_MODE)
 
-if total_repo_count > 0 and not DEBUG_MODE:
-    st.info(f"Displaying data for the **{repo_limit}** most recently updated repositories out of **{total_repo_count}** total.")
+# --- Custom CSS for scrollable tables ---
+st.markdown("""
+<style>
+.table-container {
+    height: 350px;
+    overflow-y: auto;
+}
+</style>
+""", unsafe_allow_html=True)
 
-if st.sidebar.button("Refresh Data"):
-    st.cache_data.clear()
-    st.rerun()
+# --- Sidebar ---
+st.sidebar.title("Settings")
+if DEBUG_MODE:
+    st.sidebar.warning("Debug Mode is ON. Using local data.")
+else:
+    st.sidebar.info("Debug Mode is OFF. Fetching live data.")
+    if st.sidebar.button("Refresh Live Data"):
+        st.cache_data.clear()
+        st.rerun()
 
-# (The rest of the app display code is unchanged)
-if prs_data is not None:
-    st.subheader(f"Open Pull Requests ({len(prs_data)})")
-    if not prs_data:
-        st.info("No open pull requests found. Great job! ✨")
-    else:
-        pr_df = pd.DataFrame(prs_data)
-        st.dataframe(
-            pr_df,
-            column_config={"url": st.column_config.LinkColumn("Link", display_text="Open on GitHub →")},
-            use_container_width=True
-        )
+# --- Data Loading ---
+if DEBUG_MODE:
+    try:
+        with open(DEBUG_DATA_FILE, 'r') as f:
+            data = json.load(f)
+            commits_data, open_prs_data, merged_prs_data = data["commits"], data["open_prs"], data["merged_prs"]
+    except FileNotFoundError:
+        st.sidebar.error(f"{DEBUG_DATA_FILE} not found. Turn off Debug Mode to fetch and create it.")
+        st.stop()
+else:
+    with st.spinner("Fetching live data from GitHub..."):
+        commits_data, open_prs_data, merged_prs_data = load_github_data(GITHUB_TOKEN)
+
+if not commits_data and not open_prs_data and not merged_prs_data:
+    st.info("No data loaded. Check your token or try fetching live data.")
+    st.stop()
+
+# --- UI Layout ---
+
+# --- Pull Request Sections ---
+st.header("Pull Requests")
+
+# Box 1: Recent Open PRs
+st.subheader("Recent Open Pull Requests")
+total_open_prs = len(open_prs_data)
+num_open_prs = st.slider("Number to show", 1, max(1, total_open_prs), min(10, total_open_prs), key="num_open_prs")
+st.write(f"Showing **{num_open_prs}** of **{total_open_prs}** open pull requests.")
+if total_open_prs > 0:
+    df = pd.DataFrame(open_prs_data[:num_open_prs])
+    df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
+    df['PR Number'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
+    df.rename(columns={"title": "Title", "author": "Author", "date": "Date"}, inplace=True)
+    html = df[['Repository', 'PR Number', 'Title', 'Author', 'Date']].to_html(escape=False, index=False)
+    st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
 
 st.divider()
 
-if commits_data is not None:
-    st.subheader("Recent Commits")
-    if not commits_data:
-        st.info("No recent commits found.")
-    else:
-        commit_df = pd.DataFrame(commits_data)
-        st.dataframe(commit_df, use_container_width=True)
+# Box 2: Recent Merged PRs
+st.subheader("Recent Merged Pull Requests")
+total_merged_prs = len(merged_prs_data)
+num_merged_prs = st.slider("Number to show", 1, max(1, total_merged_prs), min(10, total_merged_prs), key="num_merged_prs")
+st.write(f"Showing **{num_merged_prs}** of **{total_merged_prs}** merged pull requests.")
+if total_merged_prs > 0:
+    df = pd.DataFrame(merged_prs_data[:num_merged_prs])
+    df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
+    df['PR Number'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
+    df.rename(columns={"title": "Title", "author": "Author", "date": "Date"}, inplace=True)
+    html = df[['Repository', 'PR Number', 'Title', 'Author', 'Date']].to_html(escape=False, index=False)
+    st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+
+st.divider()
+
+# Box 3: PRs by Repository
+st.subheader("Pull Requests by Repository")
+all_prs_data = sorted(open_prs_data + merged_prs_data, key=itemgetter('date'), reverse=True)
+if all_prs_data:
+    repo_list_prs = sorted(list(set(p['repo'] for p in all_prs_data)))
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        selected_repo_prs = st.selectbox("Select Repository", repo_list_prs, key="prs_repo_select")
+
+    prs_in_repo = [p for p in all_prs_data if p['repo'] == selected_repo_prs]
+    total_prs_in_repo = len(prs_in_repo)
+
+    with col2:
+        num_prs_repo = st.slider("Number to show", 1, max(1, total_prs_in_repo), min(10, total_prs_in_repo), key="num_prs_repo")
+
+    st.write(f"Showing **{num_prs_repo}** of **{total_prs_in_repo}** pull requests for **{selected_repo_prs}**.")
+    if total_prs_in_repo > 0:
+        df = pd.DataFrame(prs_in_repo[:num_prs_repo])
+        df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
+        df['PR Number'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
+        df.rename(columns={"title": "Title", "author": "Author", "date": "Date"}, inplace=True)
+        html = df[['Repository', 'PR Number', 'Title', 'Author', 'Date']].to_html(escape=False, index=False)
+        st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+else:
+    st.info("No pull requests found.")
+
+# --- Commit Sections ---
+st.header("Commits")
+
+# Box 4: Recent Commits
+st.subheader("Recent Commits")
+total_commits = len(commits_data)
+num_recent_commits = st.slider("Number to show", 1, max(1, total_commits), min(10, total_commits), key="num_recent_commits")
+st.write(f"Showing **{num_recent_commits}** of **{total_commits}** recent commits.")
+if total_commits > 0:
+    df = pd.DataFrame(commits_data[:num_recent_commits])
+    df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
+    df['Branch'] = df.apply(lambda row: f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>", axis=1)
+    df['SHA'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>", axis=1)
+    df.rename(columns={"message": "Message", "author": "Author", "date": "Date"}, inplace=True)
+    html = df[['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']].to_html(escape=False, index=False)
+    st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+
+st.divider()
+
+# Box 5: Commits by Repository
+st.subheader("Commits by Repository")
+if commits_data:
+    repo_list_commits = sorted(list(set(c['repo'] for c in commits_data)))
+    col3, col4 = st.columns([3, 1])
+    with col3:
+        selected_repo_commits = st.selectbox("Select Repository", repo_list_commits, key="commits_repo_select")
+
+    commits_in_repo = [c for c in commits_data if c['repo'] == selected_repo_commits]
+    total_commits_in_repo = len(commits_in_repo)
+
+    with col4:
+        num_commits_repo = st.slider("Number to show", 1, max(1, total_commits_in_repo), min(10, total_commits_in_repo), key="num_commits_repo")
+
+    st.write(f"Showing **{num_commits_repo}** of **{total_commits_in_repo}** commits for **{selected_repo_commits}**.")
+    if total_commits_in_repo > 0:
+        df = pd.DataFrame(commits_in_repo[:num_commits_repo])
+        df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
+        df['Branch'] = df.apply(lambda row: f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>", axis=1)
+        df['SHA'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>", axis=1)
+        df.rename(columns={"message": "Message", "author": "Author", "date": "Date"}, inplace=True)
+        html = df[['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']].to_html(escape=False, index=False)
+        st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+else:
+    st.info("No commits found.")
