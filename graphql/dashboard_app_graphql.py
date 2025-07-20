@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import os
 import json
-import time # Import the time module
+import time
+import datetime
+from datetime import timedelta
 from dotenv import load_dotenv
 from operator import itemgetter
 
@@ -25,7 +27,7 @@ def load_github_data(token):
     """Fetches data from GitHub and optionally saves it for debugging."""
     if not token:
         st.error("GITHUB_TOKEN environment variable not set.")
-        return None, None, None
+        return [], [], [], [], [] # Return empty lists for all 5 expected values
 
     if DEBUG_MODE:
         print("Running in DEBUG_MODE. Data will be loaded from/saved to local file.")
@@ -48,14 +50,70 @@ def load_github_data(token):
     print(f"Time to fetch bulk data for {len(repo_names_for_bulk_fetch)} repositories: {end_bulk_fetch_time - start_bulk_fetch_time:.2f} seconds")
     print(f"Total API call time: {end_bulk_fetch_time - start_time:.2f} seconds")
 
+    # Filter data for 'This Week's Activity'
+    one_week_ago = datetime.datetime.now(datetime.timezone.utc) - timedelta(weeks=1)
+
+    this_week_commits = [c for c in commits if datetime.datetime.fromisoformat(c['date'].replace('Z', '+00:00')) >= one_week_ago]
+
+    this_week_open_prs = []
+    for pr in open_prs:
+        pr_date = datetime.datetime.fromisoformat(pr['date'].replace('Z', '+00:00'))
+        if pr_date >= one_week_ago:
+            pr['status'] = 'Open'
+            this_week_open_prs.append(pr)
+
+    this_week_merged_prs = []
+    for pr in merged_prs:
+        pr_date = datetime.datetime.fromisoformat(pr['date'].replace('Z', '+00:00'))
+        if pr_date >= one_week_ago:
+            pr['status'] = 'Merged'
+            this_week_merged_prs.append(pr)
+
+    this_week_prs = sorted(this_week_open_prs + this_week_merged_prs, key=itemgetter('date'), reverse=True)
+
     if not DEBUG_MODE:
         with open(DEBUG_DATA_FILE, 'w') as f:
-            json.dump({"commits": commits, "open_prs": open_prs, "merged_prs": merged_prs}, f, indent=4)
+            json.dump({"commits": commits, "open_prs": open_prs, "merged_prs": merged_prs, "this_week_commits": this_week_commits, "this_week_prs": this_week_prs}, f, indent=4)
 
-    return commits, open_prs, merged_prs
+    return commits, open_prs, merged_prs, this_week_commits, this_week_prs
 
 # --- Main App ---
 st.title("⚡ Personal GitHub Dashboard (GraphQL)")
+
+commits_data, open_prs_data, merged_prs_data, this_week_commits, this_week_prs = load_github_data(GITHUB_TOKEN)
+
+# --- UI Layout ---
+
+# --- This Week's Activity ---
+st.header("This Week's Activity")
+col_commits, col_prs = st.columns(2)
+
+with col_commits:
+    st.subheader(f"Recent Commits ({len(this_week_commits)})")
+    if this_week_commits:
+        df_commits = pd.DataFrame(this_week_commits)
+        df_commits['Repository'] = df_commits.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
+        df_commits['Branch'] = df_commits.apply(lambda row: f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>", axis=1)
+        df_commits['SHA'] = df_commits.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>", axis=1)
+        df_commits.rename(columns={"message": "Message", "author": "Author", "date": "Date"}, inplace=True)
+        html_commits = df_commits[['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']].to_html(escape=False, index=False)
+        st.markdown(f'<div class="table-container">{html_commits}</div>', unsafe_allow_html=True)
+    else:
+        st.info("No commits this week.")
+
+with col_prs:
+    st.subheader(f"Recent Pull Requests ({len(this_week_prs)})")
+    if this_week_prs:
+        df_prs = pd.DataFrame(this_week_prs)
+        df_prs['Repository'] = df_prs.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
+        df_prs['PR Number'] = df_prs.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
+        df_prs.rename(columns={"title": "Title", "author": "Author", "date": "Date", "status": "Status"}, inplace=True)
+        html_prs = df_prs[['Repository', 'PR Number', 'Title', 'Author', 'Date', 'Status']].to_html(escape=False, index=False)
+        st.markdown(f'<div class="table-container">{html_prs}</div>', unsafe_allow_html=True)
+    else:
+        st.info("No pull requests opened or merged this week.")
+
+st.divider()
 
 # --- Custom CSS for scrollable tables ---
 st.markdown("""
@@ -76,25 +134,6 @@ else:
     if st.sidebar.button("Refresh Live Data"):
         st.cache_data.clear()
         st.rerun()
-
-# --- Data Loading ---
-if DEBUG_MODE:
-    try:
-        with open(DEBUG_DATA_FILE, 'r') as f:
-            data = json.load(f)
-            commits_data, open_prs_data, merged_prs_data = data["commits"], data["open_prs"], data["merged_prs"]
-    except FileNotFoundError:
-        st.sidebar.error(f"{DEBUG_DATA_FILE} not found. Turn off Debug Mode to fetch and create it.")
-        st.stop()
-else:
-    with st.spinner("Fetching live data from GitHub..."):
-        commits_data, open_prs_data, merged_prs_data = load_github_data(GITHUB_TOKEN)
-
-if not commits_data and not open_prs_data and not merged_prs_data:
-    st.info("No data loaded. Check your token or try fetching live data.")
-    st.stop()
-
-# --- UI Layout ---
 
 # --- Pull Request Sections ---
 st.header("Pull Requests")
