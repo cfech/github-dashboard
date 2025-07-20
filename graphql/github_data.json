@@ -1,0 +1,41 @@
+{
+  "commits": [
+    {
+      "repo": "cfech/aws-ai-practitioner",
+      "sha": "7578422",
+      "message": "adding exam cheatsheet",
+      "author": "Connor Fech",
+      "date": "2025-07-19T19:40:36Z"
+    },
+    {
+      "repo": "cfech/aws-ai-practitioner",
+      "sha": "b65c8d8",
+      "message": "initial commit",
+      "author": "Connor Fech",
+      "date": "2025-05-25T01:16:22Z"
+    },
+    {
+      "repo": "cfech/aws-ai-practitioner",
+      "sha": "136f8e1",
+      "message": "Initial commit",
+      "author": "Connor Fech",
+      "date": "2025-05-23T19:26:50Z"
+    },
+    {
+      "repo": "cfech/aws-solutions-architect-associate",
+      "sha": "7b2401e",
+      "message": "updating exam notes",
+      "author": "Connor Fech",
+      "date": "2025-02-15T00:25:29Z"
+    },
+    {
+      "repo": "cfech/aws-solutions-architect-associate",
+      "sha": "13932c7",
+      "message": "updating exam notes",
+      "author": "Connor Fech",
+      "date": "2025-02-15T00:13:54Z"
+    }
+  ],
+  "prs": [],
+  "total_repo_count": 82
+}
