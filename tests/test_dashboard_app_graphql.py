@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -24,7 +25,7 @@ class TestDashboardAppGraphQL(unittest.TestCase):
         mock_st.cache_data.return_value = lambda func: func
 
         # Run the function
-        commits, open_prs, merged_prs, this_week_commits, this_week_prs = _get_github_data('fake_token', False, None, [], None)
+        commits, open_prs, merged_prs, this_week_commits, this_week_prs = _get_github_data('fake_token', False, os.getcwd() +"/github_data.json", [], None)
 
         # Assertions
         self.assertEqual(len(commits), 1)
