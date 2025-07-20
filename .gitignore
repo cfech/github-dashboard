@@ -4,3 +4,4 @@
 __pycache__/
 *.pyc
 github_data.json
+.coverage

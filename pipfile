@@ -12,6 +12,7 @@ requests = "*"
 python-dotenv = "*"
 psycopg2-binary = "*"
 debugpy = "*"
+coverage = "*"
 
 
 [requires]
