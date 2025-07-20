@@ -31,6 +31,18 @@ def load_github_data(token):
 
     if DEBUG_MODE:
         print("Running in DEBUG_MODE. Data will be loaded from/saved to local file.")
+        if os.path.exists(DEBUG_DATA_FILE):
+            with open(DEBUG_DATA_FILE, 'r') as f:
+                debug_data = json.load(f)
+            commits = debug_data.get("commits", [])
+            open_prs = debug_data.get("open_prs", [])
+            merged_prs = debug_data.get("merged_prs", [])
+            this_week_commits = debug_data.get("this_week_commits", [])
+            this_week_prs = debug_data.get("this_week_prs", [])
+            print(f"Loaded data from {DEBUG_DATA_FILE}")
+            return commits, open_prs, merged_prs, this_week_commits, this_week_prs
+        else:
+            print(f"Debug data file {DEBUG_DATA_FILE} not found. Fetching live data and saving for future debug runs.")
 
     start_time = time.time()
     repo_names = github_service.get_all_accessible_repo_names(token, specific_org_logins=TARGET_ORGANIZATIONS)
@@ -71,7 +83,7 @@ def load_github_data(token):
 
     this_week_prs = sorted(this_week_open_prs + this_week_merged_prs, key=itemgetter('date'), reverse=True)
 
-    if not DEBUG_MODE:
+    if DEBUG_MODE or not os.path.exists(DEBUG_DATA_FILE): # Save if in debug mode or if file doesn't exist
         with open(DEBUG_DATA_FILE, 'w') as f:
             json.dump({"commits": commits, "open_prs": open_prs, "merged_prs": merged_prs, "this_week_commits": this_week_commits, "this_week_prs": this_week_prs}, f, indent=4)
 
