@@ -9,6 +9,10 @@ pandas = "*"
 PyGithub = "*"
 dotenv = "*"
 requests = "*"
+python-dotenv = "*"
+psycopg2-binary = "*"
+debugpy = "*"
+
 
 [requires]
 python_version = "3.12"

@@ -8,16 +8,18 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from operator import itemgetter
 
+from .github_service_graphql import get_all_accessible_repo_names, get_bulk_data
+
 load_dotenv()
-import github_service_graphql as github_service
+
 
 # --- Page Configuration ---
 st.set_page_config(page_title="GitHub Dashboard (GraphQL)", page_icon="⚡", layout="wide")
 
 # --- App Constants ---
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-DEBUG_DATA_FILE = "github_data.json"
-DEBUG_MODE = False
+DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
+DEBUG_MODE = True
 TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
 REPO_FETCH_LIMIT = 25 # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
@@ -45,7 +47,7 @@ def load_github_data(token):
             print(f"Debug data file {DEBUG_DATA_FILE} not found. Fetching live data and saving for future debug runs.")
 
     start_time = time.time()
-    repo_names = github_service.get_all_accessible_repo_names(token, specific_org_logins=TARGET_ORGANIZATIONS)
+    repo_names = get_all_accessible_repo_names(token, specific_org_logins=TARGET_ORGANIZATIONS)
     end_repo_fetch_time = time.time()
     print(f"Time to fetch all accessible repository names: {end_repo_fetch_time - start_time:.2f} seconds")
 
@@ -57,7 +59,7 @@ def load_github_data(token):
         repo_names_for_bulk_fetch = repo_names
 
     start_bulk_fetch_time = time.time()
-    commits, open_prs, merged_prs = github_service.get_bulk_data(token, repo_names_for_bulk_fetch)
+    commits, open_prs, merged_prs = get_bulk_data(token, repo_names_for_bulk_fetch)
     end_bulk_fetch_time = time.time()
     print(f"Time to fetch bulk data for {len(repo_names_for_bulk_fetch)} repositories: {end_bulk_fetch_time - start_bulk_fetch_time:.2f} seconds")
     print(f"Total API call time: {end_bulk_fetch_time - start_time:.2f} seconds")
