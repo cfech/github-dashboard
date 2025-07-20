@@ -13,13 +13,17 @@ def _run_graphql_query(token: str, query: str, variables: dict = None):
     response.raise_for_status()
     return response.json()
 
-def get_all_accessible_repo_names(token: str):
-    """Gets all accessible repo names using GraphQL with pagination."""
-    repo_names = []
-    has_next_page = True
-    end_cursor = None
+def get_all_accessible_repo_names(token: str, specific_org_logins: list[str] | None = None):
+    """Gets all accessible repo names using GraphQL with pagination, including those accessible via organization membership and teams.
+    If specific_org_logins is provided, only repos from those organizations will be fetched in addition to direct repos.
+    """
+    all_repo_names = set() # Use a set to automatically handle deduplication
+    all_repos_with_pushed_at = {}
     print("Fetching all accessible repository names...")
 
+    # --- Phase 1: Fetch repositories directly affiliated with the user ---
+    has_next_page = True
+    end_cursor = None
     while has_next_page:
         query = """
         query($endCursor: String) {
@@ -27,6 +31,7 @@ def get_all_accessible_repo_names(token: str):
             repositories(first: 100, after: $endCursor, affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER], orderBy: {field: PUSHED_AT, direction: DESC}) {
               nodes {
                 nameWithOwner
+                pushedAt
               }
               pageInfo {
                 hasNextPage
@@ -40,14 +45,86 @@ def get_all_accessible_repo_names(token: str):
         result = _run_graphql_query(token, query, variables)
         data = result.get("data", {}).get("viewer", {}).get("repositories", {})
         nodes = data.get("nodes", [])
-        repo_names.extend([repo["nameWithOwner"] for repo in nodes])
+        for repo in nodes:
+            all_repos_with_pushed_at[repo["nameWithOwner"]] = repo["pushedAt"]
 
         page_info = data.get("pageInfo", {})
         has_next_page = page_info.get("hasNextPage", False)
         end_cursor = page_info.get("endCursor")
 
-    print(f"Fetched {len(repo_names)} total repositories.")
-    return repo_names
+    # --- Phase 2: Fetch repositories from specified organizations ---
+    org_logins_to_fetch = []
+    if specific_org_logins is not None: # If a list is provided (even empty), use it
+        org_logins_to_fetch = specific_org_logins
+    else: # If specific_org_logins is None, fetch all organizations
+        has_next_org_page = True
+        org_end_cursor = None
+        while has_next_org_page:
+            org_query = """
+            query($orgEndCursor: String) {
+              viewer {
+                organizations(first: 100, after: $orgEndCursor) {
+                  nodes {
+                    login
+                  }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                }
+              }
+            }
+            """
+            org_variables = {"orgEndCursor": org_end_cursor}
+            org_result = _run_graphql_query(token, org_query, org_variables)
+            org_data = org_result.get("data", {}).get("viewer", {}).get("organizations", {})
+            org_nodes = org_data.get("nodes", [])
+            for org in org_nodes:
+                org_logins_to_fetch.append(org["login"])
+
+            org_page_info = org_data.get("pageInfo", {})
+            has_next_org_page = org_page_info.get("hasNextPage", False)
+            org_end_cursor = org_page_info.get("endCursor")
+
+    # Now, for each organization in the determined list, fetch its repositories
+    for org_login in org_logins_to_fetch:
+        print(f"Fetching repositories for organization: {org_login}...")
+        has_next_repo_page = True
+        repo_end_cursor = None
+        while has_next_repo_page:
+            org_repo_query = """
+            query($orgLogin: String!, $repoEndCursor: String) {
+              organization(login: $orgLogin) {
+                repositories(first: 100, after: $repoEndCursor, orderBy: {field: PUSHED_AT, direction: DESC}) {
+                  nodes {
+                    nameWithOwner
+                    pushedAt
+                  }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                }
+              }
+            }
+            """
+            org_repo_variables = {"orgLogin": org_login, "repoEndCursor": repo_end_cursor}
+            org_repo_result = _run_graphql_query(token, org_repo_query, org_repo_variables)
+            org_repo_data = org_repo_result.get("data", {}).get("organization", {}).get("repositories", {})
+            org_repo_nodes = org_repo_data.get("nodes", [])
+            for repo in org_repo_nodes:
+                all_repos_with_pushed_at[repo["nameWithOwner"]] = repo["pushedAt"]
+
+            org_repo_page_info = org_repo_data.get("pageInfo", {})
+            has_next_repo_page = org_repo_page_info.get("hasNextPage", False)
+            repo_end_cursor = org_repo_page_info.get("endCursor")
+
+    # Sort all repositories by pushedAt before returning
+    sorted_repos = sorted(all_repos_with_pushed_at.items(), key=lambda item: item[1] if item[1] else "", reverse=True)
+    final_repo_names = [repo_name for repo_name, _ in sorted_repos]
+
+    print(f"Fetched {len(final_repo_names)} total repositories.")
+    return final_repo_names
 
 def _build_bulk_query(repo_names: list[str], commit_limit: int, pr_limit: int):
     """Dynamically builds the bulk query string for commits and PRs."""
@@ -134,7 +211,7 @@ def get_bulk_data(token: str, repo_names: list[str], commit_limit: int = 100, pr
             all_open_prs.append({
                 "repo": repo_name, "repo_url": repo_url,
                 "pr_number": pr_node["number"], "title": pr_node["title"],
-                "author": pr_node.get("author", {}).get("login", "n/a"),
+                "author": pr_node["author"]["login"] if pr_node.get("author") and pr_node["author"] else "n/a",
                 "date": pr_node["createdAt"], "url": pr_node["url"]
             })
 
