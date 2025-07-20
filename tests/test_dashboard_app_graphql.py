@@ -1,9 +1,12 @@
 import unittest
 from unittest.mock import patch
-import dashboard_app_graphql as dashboard_app
+
+from dashboard_app_graphql import _get_github_data
+
 
 class TestDashboardAppGraphQL(unittest.TestCase):
 
+# TODO - fix this test
     @patch('dashboard_app_graphql.get_all_accessible_repo_names')
     @patch('dashboard_app_graphql.get_bulk_data')
     @patch('dashboard_app_graphql.st')
@@ -21,7 +24,7 @@ class TestDashboardAppGraphQL(unittest.TestCase):
         mock_st.cache_data.return_value = lambda func: func
 
         # Run the function
-        commits, open_prs, merged_prs, this_week_commits, this_week_prs = dashboard_app.load_github_data('fake_token')
+        commits, open_prs, merged_prs, this_week_commits, this_week_prs = _get_github_data('fake_token', False, None, [], None)
 
         # Assertions
         self.assertEqual(len(commits), 1)

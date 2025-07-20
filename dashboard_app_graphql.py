@@ -3,8 +3,7 @@ import pandas as pd
 import os
 import json
 import time
-import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from operator import itemgetter
 
@@ -16,13 +15,14 @@ load_dotenv()
 # --- App Constants ---
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
-DEBUG_MODE = True
+DEBUG_MODE = False
 TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
 REPO_FETCH_LIMIT = 25 # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
 def _get_github_data(token, debug_mode, debug_data_file, target_organizations, repo_fetch_limit):
     """Fetches and processes data from GitHub, with optional debug mode loading."""
     if not token:
+        st.error("GITHUB_TOKEN environment variable not set.")
         return [], [], [], [], []
 
     if debug_mode:
@@ -53,20 +53,20 @@ def _get_github_data(token, debug_mode, debug_data_file, target_organizations, r
     end_time = time.time()
     st.write(f"Time to fetch bulk data: {end_time - start_time:.2f} seconds")
 
-    one_week_ago = datetime.datetime.now(datetime.timezone.utc) - timedelta(weeks=1)
+    one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
 
-    this_week_commits = [c for c in commits if datetime.datetime.fromisoformat(c['date'].replace('Z', '+00:00')) >= one_week_ago]
+    this_week_commits = [c for c in commits if datetime.fromisoformat(c['date'].replace('Z', '+00:00')) >= one_week_ago]
 
     this_week_open_prs = []
     for pr in open_prs:
-        pr_date = datetime.datetime.fromisoformat(pr['date'].replace('Z', '+00:00'))
+        pr_date = datetime.fromisoformat(pr['date'].replace('Z', '+00:00'))
         if pr_date >= one_week_ago:
             pr['status'] = 'Open'
             this_week_open_prs.append(pr)
 
     this_week_merged_prs = []
     for pr in merged_prs:
-        pr_date = datetime.datetime.fromisoformat(pr['date'].replace('Z', '+00:00'))
+        pr_date = datetime.fromisoformat(pr['date'].replace('Z', '+00:00'))
         if pr_date >= one_week_ago:
             pr['status'] = 'Merged'
             this_week_merged_prs.append(pr)

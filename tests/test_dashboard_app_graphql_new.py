@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Assuming dashboard_app_graphql.py is in the root directory
 from dashboard_app_graphql import _get_github_data, _display_recent_commits, _display_recent_prs, _display_pull_requests_section, _display_commits_section
@@ -69,7 +69,7 @@ class TestDashboardAppGraphQLNew(unittest.TestCase):
         mock_exists.return_value = False
         mock_get_all_accessible_repo_names.return_value = ['owner/repo1']
         mock_get_bulk_data.return_value = (
-            [{"repo": "owner/repo1", "message": "Test commit", "date": (datetime.now(datetime.timezone.utc) - timedelta(days=1)).isoformat()}],
+            [{"repo": "owner/repo1", "message": "Test commit", "date": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()}],
             [],
             []
         )
@@ -90,17 +90,22 @@ class TestDashboardAppGraphQLNew(unittest.TestCase):
     @patch('dashboard_app_graphql.st')
     @patch('dashboard_app_graphql.get_all_accessible_repo_names')
     @patch('dashboard_app_graphql.get_bulk_data')
-    def test_get_github_data_repo_fetch_limit(self, mock_get_bulk_data, mock_get_all_accessible_repo_names, mock_st):
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('json.dump')
+    def test_get_github_data_repo_fetch_limit(self, mock_json_dump, mock_open, mock_exists, mock_get_bulk_data, mock_get_all_accessible_repo_names, mock_st):
+        mock_exists.return_value = False # Simulate file not existing for debug mode write
         mock_get_all_accessible_repo_names.return_value = [f'owner/repo{i}' for i in range(50)]
         mock_get_bulk_data.return_value = ([], [], [])
 
         _get_github_data(
-            "fake_token", False, "/fake/path/data.json", [], 10
+            "fake_token", True, "/fake/path/data.json", [], 10
         )
 
         mock_get_bulk_data.assert_called_once()
         self.assertEqual(mock_get_bulk_data.call_args[0][1], [f'owner/repo{i}' for i in range(10)])
-        mock_st.warning.assert_called_once()
+        mock_open.assert_called_once_with("/fake/path/data.json", 'w')
+        mock_json_dump.assert_called_once()
 
     @patch('dashboard_app_graphql.st')
     def test_display_recent_commits_empty(self, mock_st):
