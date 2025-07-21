@@ -7,9 +7,16 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from operator import itemgetter
 
-from github_service_graphql import get_all_accessible_repo_names, get_bulk_data
+from github_service_graphql import get_all_accessible_repo_names, get_bulk_data, get_all_accessible_repo_data
+from commit_stream import display_commit_stream
 
 load_dotenv()
+# --- App Constants ---
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
+DEBUG_MODE = False
+TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
+REPO_FETCH_LIMIT = 25 # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
 
 # --- Helper Functions ---
@@ -25,12 +32,6 @@ def _is_today_local(utc_timestamp):
     local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
     return local_dt.date() == datetime.now().date()
 
-# --- App Constants ---
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
-DEBUG_MODE = True
-TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
-REPO_FETCH_LIMIT = 25 # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
 def _get_github_data(token, debug_mode, debug_data_file, target_organizations, repo_fetch_limit):
     """Fetches and processes data from GitHub, with optional debug mode loading."""
@@ -463,6 +464,26 @@ def main():
         GITHUB_TOKEN, DEBUG_MODE, DEBUG_DATA_FILE, TARGET_ORGANIZATIONS, REPO_FETCH_LIMIT
     )
     end_time = time.time()
+    
+    # Get full repo data with push dates for commit stream
+    if not DEBUG_MODE and GITHUB_TOKEN:
+        repo_data_with_dates = get_all_accessible_repo_data(GITHUB_TOKEN, TARGET_ORGANIZATIONS)
+        print(f"📋 [MAIN DASHBOARD] Got {len(repo_data_with_dates)} repos with push dates for commit stream")
+    else:
+        # In debug mode, create mock repo data from existing repos
+        existing_repo_names = []
+        if commits_data:
+            existing_repo_names = list(set(c['repo'] for c in commits_data))
+        elif open_prs_data:
+            existing_repo_names = list(set(pr['repo'] for pr in open_prs_data))
+        elif merged_prs_data:
+            existing_repo_names = list(set(pr['repo'] for pr in merged_prs_data))
+        
+        # Create mock repo data for debug mode
+        from datetime import datetime, timezone
+        mock_date = datetime.now(timezone.utc).isoformat()
+        repo_data_with_dates = [(name, mock_date) for name in existing_repo_names]
+        print(f"📋 [MAIN DASHBOARD] DEBUG MODE: Created mock repo data for {len(existing_repo_names)} repos")
 
     # --- UI Layout ---
     st.markdown("""
@@ -471,17 +492,29 @@ def main():
     </style>
 """, unsafe_allow_html=True)
 
-    # --- This Week's Activity ---
-    st.header("This Week's Activity")
-    col_commits, col_prs = st.columns(2)
+    # --- Layout with commit stream on RIGHT side ---
+    main_content, right_sidebar = st.columns([3, 1])
+    
+    with main_content:
+        # --- This Week's Activity ---
+        st.header("This Week's Activity")
+        col_commits, col_prs = st.columns(2)
 
-    with col_commits:
-        _display_recent_commits(this_week_commits)
+        with col_commits:
+            _display_recent_commits(this_week_commits)
 
-    with col_prs:
-        _display_recent_prs(this_week_prs)
+        with col_prs:
+            _display_recent_prs(this_week_prs)
 
-    st.divider()
+        st.divider()
+        
+        # Move the rest of the content into main area
+        _display_pull_requests_section(open_prs_data, merged_prs_data)
+        _display_commits_section(commits_data)
+    
+    with right_sidebar:
+        # Display commit stream on the RIGHT side of the screen
+        display_commit_stream(GITHUB_TOKEN, repo_data_with_dates, DEBUG_MODE)
 
     # --- Custom CSS for scrollable tables and highlighting ---
     st.markdown("""
@@ -544,9 +577,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Data Status:**")
     st.sidebar.text(f"Fetch time: {end_time - start_time:.2f}s")
-
-    _display_pull_requests_section(open_prs_data, merged_prs_data)
-    _display_commits_section(commits_data)
+    
 
 if __name__ == "__main__":
     main()
