@@ -14,9 +14,9 @@ load_dotenv()
 # --- App Constants ---
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
-DEBUG_MODE = True
+DEBUG_MODE = False
 TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
-REPO_FETCH_LIMIT = os.getenv("REPO_FETCH_LIMIT", 25) # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
+REPO_FETCH_LIMIT = int(os.getenv("REPO_FETCH_LIMIT", 25)) # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
 
 # --- Helper Functions ---
@@ -31,6 +31,99 @@ def _is_today_local(utc_timestamp):
     utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
     local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
     return local_dt.date() == datetime.now().date()
+
+def _get_date_color_and_badge(utc_timestamp):
+    """Get color coding and badge for dates based on recency"""
+    utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
+    local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    week_ago = today - timedelta(days=7)
+    
+    item_date = local_dt.date()
+    
+    if item_date == today:
+        return "#9C27B0", "🌟"  # Nice purple for today - shining star
+    elif item_date == yesterday:
+        return "#43A047", "🌙"  # Green for yesterday - recent moon
+    elif item_date >= week_ago:
+        return "#FB8C00", "☄️"   # Orange for this week - comet streak
+    else:
+        return "#FFFFFF", "⭐"   # White for older - distant star
+
+def format_pr_for_stream(pr: dict) -> str:
+    """Format a single PR for the stream display with color coding."""
+    formatted_date = _format_timestamp_to_local(pr["date"])
+    date_part = formatted_date.split()[0]  # Just the date part (YYYY-MM-DD)
+    time_part = " ".join(formatted_date.split()[1:3])  # Time and AM/PM
+    
+    # Get color and badge based on date
+    date_color, badge = _get_date_color_and_badge(pr["date"])
+    
+    # Check if this PR is from today for the TODAY badge
+    pr_utc = datetime.fromisoformat(pr["date"].replace('Z', '+00:00'))
+    pr_local = pr_utc.replace(tzinfo=timezone.utc).astimezone()
+    is_today = pr_local.date() == datetime.now().date()
+    
+    # Don't truncate PR titles - allow them to wrap
+    title = pr["title"]
+    
+    # Simplified display for stream
+    repo_name = pr["repo"].split("/")[-1]
+    author = pr["author"]
+    pr_number = pr["pr_number"]
+    status = pr.get("status", "Open")
+    
+    # Status emoji and color
+    status_emoji = "✅" if status == "Merged" else "🔄"
+    
+    # Add TODAY badge if it's from today
+    repo_display = f"**[{repo_name}]({pr['repo_url']})**"
+    if is_today:
+        repo_display = f'<span class="today-badge">TODAY</span> {repo_display}'
+    
+    return f"""{badge} {repo_display} **[#{pr_number}]({pr["url"]})**  
+*{title}*  
+{status_emoji} {status} • {author}  
+📅 <span style="color: {date_color};">{date_part} {time_part}</span>"""
+
+def display_pr_stream(all_prs_data: list, debug_mode: bool = False):
+    """Display the PR stream similar to commit stream."""
+    st.subheader("🔀 Live PR Stream")
+    if debug_mode:
+        st.markdown("*Recent pull requests* **[DEBUG MODE]**")
+    else:
+        st.markdown("*Recent pull requests*")
+    
+    if not all_prs_data:
+        st.info("No recent pull requests found")
+        return
+    
+    # Sort PRs by date to ensure newest first
+    prs_sorted = sorted(all_prs_data, key=lambda x: x["date"], reverse=True)
+    today = datetime.now().date()
+    
+    # Display stats
+    st.markdown(f"**{len(prs_sorted)} pull requests** • Recent activity")
+    
+    # Add refresh button
+    if st.button("🔄 Refresh PRs", key="refresh_prs"):
+        st.cache_data.clear()
+        st.rerun()
+    
+    # Create a scrollable container with same height as commit stream
+    container = st.container(height=800)
+    
+    with container:
+        # Display ALL PRs using Streamlit's native markdown
+        for i, pr in enumerate(prs_sorted):
+            # Format the PR using the formatting function
+            pr_markdown = format_pr_for_stream(pr)
+            st.markdown(pr_markdown, unsafe_allow_html=True)
+            
+            # Add separator except for last item
+            if i < len(prs_sorted) - 1:
+                st.markdown("---")
 
 
 def _get_github_data(token, debug_mode, debug_data_file, target_organizations, repo_fetch_limit):
@@ -89,118 +182,14 @@ def _get_github_data(token, debug_mode, debug_data_file, target_organizations, r
 
     this_week_prs = sorted(this_week_open_prs + this_week_merged_prs, key=itemgetter('date'), reverse=True)
 
-    if debug_mode or not os.path.exists(debug_data_file):
+    # Always save debug file when debug mode is OFF to override cached data
+    # Only save when debug mode is ON if file doesn't exist
+    if not debug_mode or not os.path.exists(debug_data_file):
         with open(debug_data_file, 'w') as f:
             json.dump({"commits": commits, "open_prs": open_prs, "merged_prs": merged_prs, "this_week_commits": this_week_commits, "this_week_prs": this_week_prs}, f, indent=4)
 
     return commits, open_prs, merged_prs, this_week_commits, this_week_prs, repo_data_with_dates
 
-def _display_recent_commits(this_week_commits):
-    st.subheader(f"Recent Commits ({len(this_week_commits)})")
-    if this_week_commits:
-        df_commits = pd.DataFrame(this_week_commits)
-        
-        # Add highlighting for today's commits (using local timezone)
-        today = datetime.now().date()
-        
-        def format_row_with_highlighting(row):
-            # Check if today and format date
-            is_today = _is_today_local(row['date'])
-            formatted_date = _format_timestamp_to_local(row['date'])
-            
-            # Base row content
-            repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
-            branch_link = f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>"
-            sha_link = f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>"
-            
-            # Add TODAY badge and highlight date text
-            date_text = formatted_date
-            if is_today:
-                repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
-                date_text = f'<span class="today-date">{formatted_date}</span>'
-            
-            return {
-                'Repository': repo_link,
-                'Branch': branch_link, 
-                'SHA': sha_link,
-                'Message': row['message'],
-                'Author': row['author'],
-                'Date': date_text,
-                'is_today': False  # No longer need row highlighting
-            }
-        
-        enhanced_commits = [format_row_with_highlighting(row) for _, row in df_commits.iterrows()]
-        df_enhanced = pd.DataFrame(enhanced_commits)
-        
-        # Generate HTML without row highlighting
-        html_rows = []
-        for _, row in df_enhanced.iterrows():
-            cells = []
-            for col in ['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']:
-                cells.append(f'<td>{row[col]}</td>')
-            html_rows.append(f'<tr>{"".join(cells)}</tr>')
-        
-        header_html = '<tr><th>Repository</th><th>Branch</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr>'
-        table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
-        
-        st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
-    else:
-        st.info("No commits this week.")
-
-def _display_recent_prs(this_week_prs):
-    st.subheader(f"Recent Pull Requests ({len(this_week_prs)})")
-    if this_week_prs:
-        df_prs = pd.DataFrame(this_week_prs)
-        
-        # Add highlighting for today's PRs (using local timezone)
-        today = datetime.now().date()
-        
-        def format_pr_row_with_highlighting(row):
-            # Check if today and format date
-            is_today = _is_today_local(row['date'])
-            formatted_date = _format_timestamp_to_local(row['date'])
-            
-            # Base row content
-            repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
-            pr_link = f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>"
-            
-            # Add TODAY badge and highlight date text
-            date_text = formatted_date
-            if is_today:
-                repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
-                date_text = f'<span class="today-date">{formatted_date}</span>'
-            
-            # Status with color coding
-            status_class = 'status-open' if row['status'] == 'Open' else 'status-merged'
-            status_html = f'<span class="{status_class}">{row["status"]}</span>'
-            
-            return {
-                'Repository': repo_link,
-                'PR Number': pr_link,
-                'Title': row['title'],
-                'Author': row['author'],
-                'Date': date_text,
-                'Status': status_html,
-                'is_today': False  # No longer need row highlighting
-            }
-        
-        enhanced_prs = [format_pr_row_with_highlighting(row) for _, row in df_prs.iterrows()]
-        df_enhanced = pd.DataFrame(enhanced_prs)
-        
-        # Generate HTML without row highlighting
-        html_rows = []
-        for _, row in df_enhanced.iterrows():
-            cells = []
-            for col in ['Repository', 'PR Number', 'Title', 'Author', 'Date', 'Status']:
-                cells.append(f'<td>{row[col]}</td>')
-            html_rows.append(f'<tr>{"".join(cells)}</tr>')
-        
-        header_html = '<tr><th>Repository</th><th>PR Number</th><th>Title</th><th>Author</th><th>Date</th><th>Status</th></tr>'
-        table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
-        
-        st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
-    else:
-        st.info("No pull requests opened or merged this week.")
 
 def _display_pull_requests_section(open_prs_data, merged_prs_data):
     st.header("Pull Requests")
@@ -494,29 +483,25 @@ def main():
     </style>
 """, unsafe_allow_html=True)
 
-    # --- Layout with commit stream on RIGHT side ---
-    main_content, right_sidebar = st.columns([3, 1])
+    # --- New Layout: Streams on top, detailed sections below ---
+    # Top section: Two streams side by side
+    st.header("🔄 Live Activity Streams")
+    stream_col1, stream_col2 = st.columns(2)
     
-    with main_content:
-        # --- This Week's Activity ---
-        st.header("This Week's Activity")
-        col_commits, col_prs = st.columns(2)
-
-        with col_commits:
-            _display_recent_commits(this_week_commits)
-
-        with col_prs:
-            _display_recent_prs(this_week_prs)
-
-        st.divider()
-        
-        # Move the rest of the content into main area
-        _display_pull_requests_section(open_prs_data, merged_prs_data)
-        _display_commits_section(commits_data)
-    
-    with right_sidebar:
-        # Display commit stream on the RIGHT side of the screen
+    with stream_col1:
+        # Display commit stream
         display_commit_stream(GITHUB_TOKEN, repo_data_with_dates, DEBUG_MODE)
+    
+    with stream_col2:
+        # Display PR stream using combined PR data
+        all_prs_data = sorted(open_prs_data + merged_prs_data, key=itemgetter('date'), reverse=True)
+        display_pr_stream(all_prs_data, DEBUG_MODE)
+    
+    st.divider()
+    
+    # Bottom section: Detailed tables in full width
+    _display_pull_requests_section(open_prs_data, merged_prs_data)
+    _display_commits_section(commits_data)
 
     # --- Custom CSS for scrollable tables and highlighting ---
     st.markdown("""
@@ -562,6 +547,31 @@ def main():
         font-size: 11px;
         font-weight: 500;
     }
+    
+    /* Stream container styling */
+    .stColumns > div:first-child,
+    .stColumns > div:last-child {
+        padding: 0 20px !important;
+    }
+    
+    /* Stream content borders and styling */
+    div[data-testid="stContainer"] {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+        backdrop-filter: blur(10px);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        margin: 10px auto;
+        max-width: 95%;
+    }
+    
+    /* Center the stream columns */
+    .stColumns {
+        gap: 2rem !important;
+        justify-content: center !important;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -579,6 +589,12 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Data Status:**")
     st.sidebar.text(f"Fetch time: {end_time - start_time:.2f}s")
+    
+    # Check commit stream debug file status
+    import os
+    cs_debug_file = os.getcwd() + "/cs_debug.json"
+    if os.path.exists(cs_debug_file):
+        st.sidebar.text("Using cached data from cs_debug.json")
     
 
 if __name__ == "__main__":
