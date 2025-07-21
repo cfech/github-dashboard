@@ -7,16 +7,16 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from operator import itemgetter
 
-from github_service_graphql import get_all_accessible_repo_names, get_bulk_data, get_all_accessible_repo_data
+from github_service_graphql import get_bulk_data, get_all_accessible_repo_data
 from commit_stream import display_commit_stream
 
 load_dotenv()
 # --- App Constants ---
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
-DEBUG_MODE = False
+DEBUG_MODE = True
 TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
-REPO_FETCH_LIMIT = 25 # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
+REPO_FETCH_LIMIT = os.getenv("REPO_FETCH_LIMIT", 25) # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
 
 # --- Helper Functions ---
@@ -37,7 +37,7 @@ def _get_github_data(token, debug_mode, debug_data_file, target_organizations, r
     """Fetches and processes data from GitHub, with optional debug mode loading."""
     if not token:
         st.error("GITHUB_TOKEN environment variable not set.")
-        return [], [], [], [], []
+        return [], [], [], [], [], []
 
     if debug_mode:
         if os.path.exists(debug_data_file):
@@ -47,15 +47,17 @@ def _get_github_data(token, debug_mode, debug_data_file, target_organizations, r
                     debug_data.get("open_prs", []),
                     debug_data.get("merged_prs", []),
                     debug_data.get("this_week_commits", []),
-                    debug_data.get("this_week_prs", []))
+                    debug_data.get("this_week_prs", []),
+                    [])  # Empty repo_data_with_dates in debug mode
         else:
             # If debug file not found, fetch live data and save
             pass # Fall through to live data fetching
 
     start_time = time.time()
-    repo_names = get_all_accessible_repo_names(token, specific_org_logins=target_organizations)
+    repo_data_with_dates = get_all_accessible_repo_data(token, specific_org_logins=target_organizations)
+    repo_names = [repo_name for repo_name, _ in repo_data_with_dates]
     end_time = time.time()
-    st.write(f"Time to fetch repo names: {end_time - start_time:.2f} seconds")
+    st.write(f"Time to fetch repo data: {end_time - start_time:.2f} seconds")
 
     if repo_fetch_limit is not None and len(repo_names) > repo_fetch_limit:
         repo_names_for_bulk_fetch = repo_names[:repo_fetch_limit]
@@ -91,7 +93,7 @@ def _get_github_data(token, debug_mode, debug_data_file, target_organizations, r
         with open(debug_data_file, 'w') as f:
             json.dump({"commits": commits, "open_prs": open_prs, "merged_prs": merged_prs, "this_week_commits": this_week_commits, "this_week_prs": this_week_prs}, f, indent=4)
 
-    return commits, open_prs, merged_prs, this_week_commits, this_week_prs
+    return commits, open_prs, merged_prs, this_week_commits, this_week_prs, repo_data_with_dates
 
 def _display_recent_commits(this_week_commits):
     st.subheader(f"Recent Commits ({len(this_week_commits)})")
@@ -460,14 +462,14 @@ def main():
     st.markdown("<p style='color: #666; font-size: 0.9em; margin-bottom: 1rem;'>⏰ All times are displayed in your local timezone (EST)</p>", unsafe_allow_html=True)
 
     start_time = time.time()
-    commits_data, open_prs_data, merged_prs_data, this_week_commits, this_week_prs = _get_github_data(
+    commits_data, open_prs_data, merged_prs_data, this_week_commits, this_week_prs, repo_data_with_dates_from_fetch = _get_github_data(
         GITHUB_TOKEN, DEBUG_MODE, DEBUG_DATA_FILE, TARGET_ORGANIZATIONS, REPO_FETCH_LIMIT
     )
     end_time = time.time()
     
-    # Get full repo data with push dates for commit stream
+    # Use repo data with push dates from the single fetch for commit stream
     if not DEBUG_MODE and GITHUB_TOKEN:
-        repo_data_with_dates = get_all_accessible_repo_data(GITHUB_TOKEN, TARGET_ORGANIZATIONS)
+        repo_data_with_dates = repo_data_with_dates_from_fetch
         print(f"📋 [MAIN DASHBOARD] Got {len(repo_data_with_dates)} repos with push dates for commit stream")
     else:
         # In debug mode, create mock repo data from existing repos

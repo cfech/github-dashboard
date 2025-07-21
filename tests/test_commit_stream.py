@@ -207,12 +207,12 @@ class TestCommitStream(unittest.TestCase):
 
         result = format_commit_for_stream(commit, is_today=True)
         
-        self.assertIn("TODAY", result)
+        self.assertIn("🔥", result)  # Fire emoji for today
         self.assertIn("test-repo", result)
         self.assertIn("main", result)
         self.assertIn("Test commit message", result)
         self.assertIn("Test Author", result)
-        self.assertIn("#ff6f00", result)  # Today color
+        self.assertIn("2025-07-20 03:00 PM", result)  # Formatted timestamp
 
     @patch('dashboard_app_graphql._format_timestamp_to_local')
     def test_format_commit_for_stream_not_today(self, mock_format):
@@ -232,12 +232,12 @@ class TestCommitStream(unittest.TestCase):
 
         result = format_commit_for_stream(commit, is_today=False)
         
-        self.assertNotIn("TODAY", result)
+        self.assertIn("•", result)  # Bullet point for non-today
         self.assertIn("test-repo", result)
         self.assertIn("feature", result)
         self.assertIn("...", result)  # Truncated message
         self.assertIn("Another Author", result)
-        self.assertIn("#666", result)  # Regular color
+        self.assertIn("2025-07-19 02:00 PM", result)  # Formatted timestamp
 
     @patch('commit_stream.get_all_commits_for_repos')
     @patch('commit_stream.get_recently_active_repos')
@@ -292,11 +292,19 @@ class TestCommitStream(unittest.TestCase):
         mock_st.error.assert_called_once_with("Error fetching commit stream: Test error")
 
     def test_get_recently_active_repos_from_existing(self):
-        existing_repos = ["owner/repo1", "owner/repo2", "owner/repo3"]
-        result = get_recently_active_repos_from_existing(existing_repos, days_back=7)
+        from datetime import datetime, timezone, timedelta
+        # Create recent dates (within 7 days)
+        recent_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        existing_repos_with_dates = [
+            ("owner/repo1", recent_date), 
+            ("owner/repo2", recent_date), 
+            ("owner/repo3", recent_date)
+        ]
+        result = get_recently_active_repos_from_existing(existing_repos_with_dates, days_back=7)
         
-        # Should return top 10 repos (or all if less than 10)
-        self.assertEqual(result, existing_repos)
+        # Should return repo names only (all 3 since they're recent)
+        expected_repos = ["owner/repo1", "owner/repo2", "owner/repo3"]
+        self.assertEqual(result, expected_repos)
         self.assertEqual(len(result), 3)
 
     @patch('commit_stream.get_all_commits_for_repos')
@@ -307,17 +315,19 @@ class TestCommitStream(unittest.TestCase):
             {"repo": "owner/repo1", "message": "Test commit", "date": "2025-07-20T10:00:00Z"}
         ]
         
-        result = get_commit_stream_data_from_repos("fake_token", ["owner/repo1", "owner/repo2", "owner/repo3"])
+        repo_data = [("owner/repo1", "2025-07-20T10:00:00Z"), ("owner/repo2", "2025-07-20T09:00:00Z"), ("owner/repo3", "2025-07-19T10:00:00Z")]
+        result = get_commit_stream_data_from_repos("fake_token", repo_data)
         
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["repo"], "owner/repo1")
-        mock_get_active.assert_called_once_with(["owner/repo1", "owner/repo2", "owner/repo3"])
-        mock_get_commits.assert_called_once_with("fake_token", ["owner/repo1", "owner/repo2"], 20)
+        mock_get_active.assert_called_once_with(repo_data)
+        mock_get_commits.assert_called_once_with("fake_token", ["owner/repo1", "owner/repo2"], 100)
 
     @patch('commit_stream.get_all_commits_for_repos')
     @patch('commit_stream.get_recently_active_repos_from_existing')
     def test_get_commit_stream_data_from_repos_no_token(self, mock_get_active, mock_get_commits):
-        result = get_commit_stream_data_from_repos("", ["owner/repo1"])
+        repo_data = [("owner/repo1", "2025-07-20T10:00:00Z")]
+        result = get_commit_stream_data_from_repos("", repo_data)
         
         self.assertEqual(result, [])
         mock_get_active.assert_not_called()
@@ -337,7 +347,7 @@ class TestCommitStream(unittest.TestCase):
     def test_display_commit_stream_no_token(self, mock_st, mock_get_data):
         display_commit_stream("")
         
-        mock_st.sidebar.warning.assert_called_once_with("GitHub token required for commit stream")
+        mock_st.warning.assert_called_once_with("GitHub token required for commit stream")
         mock_get_data.assert_not_called()
 
     @patch('commit_stream.get_commit_stream_data_from_repos')
@@ -348,8 +358,8 @@ class TestCommitStream(unittest.TestCase):
         
         display_commit_stream("fake_token", existing_repos)
         
-        mock_get_data.assert_called_once_with("fake_token", existing_repos)
-        mock_st.sidebar.info.assert_called_once_with("No recent commits found")
+        mock_get_data.assert_called_once_with("fake_token", existing_repos, debug_mode=False)
+        mock_st.info.assert_called_once_with("No recent commits found")
 
     @patch('commit_stream.get_commit_stream_data')
     @patch('commit_stream.st')
@@ -358,7 +368,7 @@ class TestCommitStream(unittest.TestCase):
 
         display_commit_stream("fake_token")
         
-        mock_st.sidebar.info.assert_called_once_with("No recent commits found")
+        mock_st.info.assert_called_once_with("No recent commits found")
 
     @patch('commit_stream.get_commit_stream_data')
     @patch('commit_stream.st')
@@ -378,8 +388,8 @@ class TestCommitStream(unittest.TestCase):
 
         display_commit_stream("fake_token")
         
-        mock_st.sidebar.subheader.assert_called_once_with("🔄 Live Commit Stream")
-        mock_st.sidebar.markdown.assert_called()
+        mock_st.subheader.assert_called_once_with("🔄 Live Commit Stream")
+        mock_st.markdown.assert_called()
         mock_format.assert_called_once()
 
     @patch('commit_stream.get_commit_stream_data')
@@ -406,7 +416,7 @@ class TestCommitStream(unittest.TestCase):
         col1_mock.__exit__ = MagicMock(return_value=None)
         col2_mock.__enter__ = MagicMock(return_value=col2_mock)
         col2_mock.__exit__ = MagicMock(return_value=None)
-        mock_st.sidebar.columns.return_value = (col1_mock, col2_mock)
+        # Remove columns mock as it's not used in current implementation
         
         # Mock button to return True when clicked
         mock_st.button.return_value = True
@@ -415,7 +425,7 @@ class TestCommitStream(unittest.TestCase):
         display_commit_stream("fake_token")
         
         # Verify basic structure is called
-        mock_st.sidebar.subheader.assert_called_once_with("🔄 Live Commit Stream")
+        mock_st.subheader.assert_called_once_with("🔄 Live Commit Stream")
 
 
 if __name__ == '__main__':

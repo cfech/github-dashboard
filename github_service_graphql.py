@@ -111,6 +111,8 @@ def get_all_accessible_repo_names(token: str, specific_org_logins: list[str] | N
             """
             org_repo_variables = {"orgLogin": org_login, "repoEndCursor": repo_end_cursor}
             org_repo_result = _run_graphql_query(token, org_repo_query, org_repo_variables)
+            if not org_repo_result:
+                continue
             org_repo_data = org_repo_result.get("data", {}).get("organization", {}).get("repositories", {})
             org_repo_nodes = org_repo_data.get("nodes", [])
             for repo in org_repo_nodes:
