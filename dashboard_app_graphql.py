@@ -12,10 +12,23 @@ from github_service_graphql import get_all_accessible_repo_names, get_bulk_data
 load_dotenv()
 
 
+# --- Helper Functions ---
+def _format_timestamp_to_local(utc_timestamp):
+    """Convert UTC timestamp to local timezone formatted string"""
+    utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
+    local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
+    return local_dt.strftime('%Y-%m-%d %I:%M %p EST')
+
+def _is_today_local(utc_timestamp):
+    """Check if UTC timestamp is today in local timezone"""
+    utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
+    local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
+    return local_dt.date() == datetime.now().date()
+
 # --- App Constants ---
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEBUG_DATA_FILE = os.getcwd() + "/github_data.json"
-DEBUG_MODE = False
+DEBUG_MODE = True
 TARGET_ORGANIZATIONS = ["mcitcentral"] # Add your organization logins here, e.g., ["my-org", "another-org"]
 REPO_FETCH_LIMIT = 25 # Set to None to fetch all, or an integer to limit to the N most recently pushed repositories
 
@@ -83,12 +96,51 @@ def _display_recent_commits(this_week_commits):
     st.subheader(f"Recent Commits ({len(this_week_commits)})")
     if this_week_commits:
         df_commits = pd.DataFrame(this_week_commits)
-        df_commits['Repository'] = df_commits.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
-        df_commits['Branch'] = df_commits.apply(lambda row: f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>", axis=1)
-        df_commits['SHA'] = df_commits.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>", axis=1)
-        df_commits.rename(columns={"message": "Message", "author": "Author", "date": "Date"}, inplace=True)
-        html_commits = df_commits[['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']].to_html(escape=False, index=False)
-        st.markdown(f'<div class="table-container">{html_commits}</div>', unsafe_allow_html=True)
+        
+        # Add highlighting for today's commits (using local timezone)
+        today = datetime.now().date()
+        
+        def format_row_with_highlighting(row):
+            # Check if today and format date
+            is_today = _is_today_local(row['date'])
+            formatted_date = _format_timestamp_to_local(row['date'])
+            
+            # Base row content
+            repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
+            branch_link = f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>"
+            sha_link = f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>"
+            
+            # Add TODAY badge and highlight date text
+            date_text = formatted_date
+            if is_today:
+                repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
+                date_text = f'<span class="today-date">{formatted_date}</span>'
+            
+            return {
+                'Repository': repo_link,
+                'Branch': branch_link, 
+                'SHA': sha_link,
+                'Message': row['message'],
+                'Author': row['author'],
+                'Date': date_text,
+                'is_today': False  # No longer need row highlighting
+            }
+        
+        enhanced_commits = [format_row_with_highlighting(row) for _, row in df_commits.iterrows()]
+        df_enhanced = pd.DataFrame(enhanced_commits)
+        
+        # Generate HTML without row highlighting
+        html_rows = []
+        for _, row in df_enhanced.iterrows():
+            cells = []
+            for col in ['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']:
+                cells.append(f'<td>{row[col]}</td>')
+            html_rows.append(f'<tr>{"".join(cells)}</tr>')
+        
+        header_html = '<tr><th>Repository</th><th>Branch</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr>'
+        table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
+        
+        st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
     else:
         st.info("No commits this week.")
 
@@ -96,11 +148,54 @@ def _display_recent_prs(this_week_prs):
     st.subheader(f"Recent Pull Requests ({len(this_week_prs)})")
     if this_week_prs:
         df_prs = pd.DataFrame(this_week_prs)
-        df_prs['Repository'] = df_prs.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
-        df_prs['PR Number'] = df_prs.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
-        df_prs.rename(columns={"title": "Title", "author": "Author", "date": "Date", "status": "Status"}, inplace=True)
-        html_prs = df_prs[['Repository', 'PR Number', 'Title', 'Author', 'Date', 'Status']].to_html(escape=False, index=False)
-        st.markdown(f'<div class="table-container">{html_prs}</div>', unsafe_allow_html=True)
+        
+        # Add highlighting for today's PRs (using local timezone)
+        today = datetime.now().date()
+        
+        def format_pr_row_with_highlighting(row):
+            # Check if today and format date
+            is_today = _is_today_local(row['date'])
+            formatted_date = _format_timestamp_to_local(row['date'])
+            
+            # Base row content
+            repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
+            pr_link = f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>"
+            
+            # Add TODAY badge and highlight date text
+            date_text = formatted_date
+            if is_today:
+                repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
+                date_text = f'<span class="today-date">{formatted_date}</span>'
+            
+            # Status with color coding
+            status_class = 'status-open' if row['status'] == 'Open' else 'status-merged'
+            status_html = f'<span class="{status_class}">{row["status"]}</span>'
+            
+            return {
+                'Repository': repo_link,
+                'PR Number': pr_link,
+                'Title': row['title'],
+                'Author': row['author'],
+                'Date': date_text,
+                'Status': status_html,
+                'is_today': False  # No longer need row highlighting
+            }
+        
+        enhanced_prs = [format_pr_row_with_highlighting(row) for _, row in df_prs.iterrows()]
+        df_enhanced = pd.DataFrame(enhanced_prs)
+        
+        # Generate HTML without row highlighting
+        html_rows = []
+        for _, row in df_enhanced.iterrows():
+            cells = []
+            for col in ['Repository', 'PR Number', 'Title', 'Author', 'Date', 'Status']:
+                cells.append(f'<td>{row[col]}</td>')
+            html_rows.append(f'<tr>{"".join(cells)}</tr>')
+        
+        header_html = '<tr><th>Repository</th><th>PR Number</th><th>Title</th><th>Author</th><th>Date</th><th>Status</th></tr>'
+        table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
+        
+        st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
     else:
         st.info("No pull requests opened or merged this week.")
 
@@ -114,11 +209,40 @@ def _display_pull_requests_section(open_prs_data, merged_prs_data):
     st.write(f"Showing **{num_open_prs}** of **{total_open_prs}** open pull requests.")
     if total_open_prs > 0:
         df = pd.DataFrame(open_prs_data[:num_open_prs])
-        df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
-        df['PR Number'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
-        df.rename(columns={"title": "Title", "author": "Author", "date": "Date"}, inplace=True)
-        html = df[['Repository', 'PR Number', 'Title', 'Author', 'Date']].to_html(escape=False, index=False)
-        st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+        
+        def format_open_pr_with_highlighting(row):
+            is_today = _is_today_local(row['date'])
+            formatted_date = _format_timestamp_to_local(row['date'])
+            
+            repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
+            pr_link = f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>"
+            
+            date_text = formatted_date
+            if is_today:
+                repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
+                date_text = f'<span class="today-date">{formatted_date}</span>'
+            
+            return {
+                'Repository': repo_link,
+                'PR Number': pr_link,
+                'Title': row['title'],
+                'Author': row['author'],
+                'Date': date_text
+            }
+        
+        enhanced_prs = [format_open_pr_with_highlighting(row) for _, row in df.iterrows()]
+        df_enhanced = pd.DataFrame(enhanced_prs)
+        
+        html_rows = []
+        for _, row in df_enhanced.iterrows():
+            cells = []
+            for col in ['Repository', 'PR Number', 'Title', 'Author', 'Date']:
+                cells.append(f'<td>{row[col]}</td>')
+            html_rows.append(f'<tr>{"".join(cells)}</tr>')
+        
+        header_html = '<tr><th>Repository</th><th>PR Number</th><th>Title</th><th>Author</th><th>Date</th></tr>'
+        table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
+        st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
 
     st.divider()
 
@@ -129,11 +253,40 @@ def _display_pull_requests_section(open_prs_data, merged_prs_data):
     st.write(f"Showing **{num_merged_prs}** of **{total_merged_prs}** merged pull requests.")
     if total_merged_prs > 0:
         df = pd.DataFrame(merged_prs_data[:num_merged_prs])
-        df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
-        df['PR Number'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
-        df.rename(columns={"title": "Title", "author": "Author", "date": "Date"}, inplace=True)
-        html = df[['Repository', 'PR Number', 'Title', 'Author', 'Date']].to_html(escape=False, index=False)
-        st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+        
+        def format_merged_pr_with_highlighting(row):
+            is_today = _is_today_local(row['date'])
+            formatted_date = _format_timestamp_to_local(row['date'])
+            
+            repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
+            pr_link = f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>"
+            
+            date_text = formatted_date
+            if is_today:
+                repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
+                date_text = f'<span class="today-date">{formatted_date}</span>'
+            
+            return {
+                'Repository': repo_link,
+                'PR Number': pr_link,
+                'Title': row['title'],
+                'Author': row['author'],
+                'Date': date_text
+            }
+        
+        enhanced_prs = [format_merged_pr_with_highlighting(row) for _, row in df.iterrows()]
+        df_enhanced = pd.DataFrame(enhanced_prs)
+        
+        html_rows = []
+        for _, row in df_enhanced.iterrows():
+            cells = []
+            for col in ['Repository', 'PR Number', 'Title', 'Author', 'Date']:
+                cells.append(f'<td>{row[col]}</td>')
+            html_rows.append(f'<tr>{"".join(cells)}</tr>')
+        
+        header_html = '<tr><th>Repository</th><th>PR Number</th><th>Title</th><th>Author</th><th>Date</th></tr>'
+        table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
+        st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
 
     st.divider()
 
@@ -155,11 +308,40 @@ def _display_pull_requests_section(open_prs_data, merged_prs_data):
         st.write(f"Showing **{num_prs_repo}** of **{total_prs_in_repo}** pull requests for **{selected_repo_prs}**.")
         if total_prs_in_repo > 0:
             df = pd.DataFrame(prs_in_repo[:num_prs_repo])
-            df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
-            df['PR Number'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>", axis=1)
-            df.rename(columns={"title": "Title", "author": "Author", "date": "Date"}, inplace=True)
-            html = df[['Repository', 'PR Number', 'Title', 'Author', 'Date']].to_html(escape=False, index=False)
-            st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+            
+            def format_repo_pr_with_highlighting(row):
+                is_today = _is_today_local(row['date'])
+                formatted_date = _format_timestamp_to_local(row['date'])
+                
+                repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
+                pr_link = f"<a href='{row['url']}' target='_blank'>{row['pr_number']}</a>"
+                
+                date_text = formatted_date
+                if is_today:
+                    repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
+                    date_text = f'<span class="today-date">{formatted_date}</span>'
+                
+                return {
+                    'Repository': repo_link,
+                    'PR Number': pr_link,
+                    'Title': row['title'],
+                    'Author': row['author'],
+                    'Date': date_text
+                }
+            
+            enhanced_prs = [format_repo_pr_with_highlighting(row) for _, row in df.iterrows()]
+            df_enhanced = pd.DataFrame(enhanced_prs)
+            
+            html_rows = []
+            for _, row in df_enhanced.iterrows():
+                cells = []
+                for col in ['Repository', 'PR Number', 'Title', 'Author', 'Date']:
+                    cells.append(f'<td>{row[col]}</td>')
+                html_rows.append(f'<tr>{"".join(cells)}</tr>')
+            
+            header_html = '<tr><th>Repository</th><th>PR Number</th><th>Title</th><th>Author</th><th>Date</th></tr>'
+            table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
+            st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
     else:
         st.info("No pull requests found.")
 
@@ -173,12 +355,42 @@ def _display_commits_section(commits_data):
     st.write(f"Showing **{num_recent_commits}** of **{total_commits}** recent commits.")
     if total_commits > 0:
         df = pd.DataFrame(commits_data[:num_recent_commits])
-        df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
-        df['Branch'] = df.apply(lambda row: f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>", axis=1)
-        df['SHA'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>", axis=1)
-        df.rename(columns={"message": "Message", "author": "Author", "date": "Date"}, inplace=True)
-        html = df[['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']].to_html(escape=False, index=False)
-        st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+        
+        def format_recent_commit_with_highlighting(row):
+            is_today = _is_today_local(row['date'])
+            formatted_date = _format_timestamp_to_local(row['date'])
+            
+            repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
+            branch_link = f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>"
+            sha_link = f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>"
+            
+            date_text = formatted_date
+            if is_today:
+                repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
+                date_text = f'<span class="today-date">{formatted_date}</span>'
+            
+            return {
+                'Repository': repo_link,
+                'Branch': branch_link,
+                'SHA': sha_link,
+                'Message': row['message'],
+                'Author': row['author'],
+                'Date': date_text
+            }
+        
+        enhanced_commits = [format_recent_commit_with_highlighting(row) for _, row in df.iterrows()]
+        df_enhanced = pd.DataFrame(enhanced_commits)
+        
+        html_rows = []
+        for _, row in df_enhanced.iterrows():
+            cells = []
+            for col in ['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']:
+                cells.append(f'<td>{row[col]}</td>')
+            html_rows.append(f'<tr>{"".join(cells)}</tr>')
+        
+        header_html = '<tr><th>Repository</th><th>Branch</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr>'
+        table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
+        st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
 
     st.divider()
 
@@ -199,12 +411,42 @@ def _display_commits_section(commits_data):
         st.write(f"Showing **{num_commits_repo}** of **{total_commits_in_repo}** commits for **{selected_repo_commits}**.")
         if total_commits_in_repo > 0:
             df = pd.DataFrame(commits_in_repo[:num_commits_repo])
-            df['Repository'] = df.apply(lambda row: f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>", axis=1)
-            df['Branch'] = df.apply(lambda row: f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>", axis=1)
-            df['SHA'] = df.apply(lambda row: f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>", axis=1)
-            df.rename(columns={"message": "Message", "author": "Author", "date": "Date"}, inplace=True)
-            html = df[['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']].to_html(escape=False, index=False)
-            st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
+            
+            def format_repo_commit_with_highlighting(row):
+                is_today = _is_today_local(row['date'])
+                formatted_date = _format_timestamp_to_local(row['date'])
+                
+                repo_link = f"<a href='{row['repo_url']}' target='_blank'>{row['repo']}</a>"
+                branch_link = f"<a href='{row['branch_url']}' target='_blank'>{row['branch_name']}</a>"
+                sha_link = f"<a href='{row['url']}' target='_blank'>{row['sha']}</a>"
+                
+                date_text = formatted_date
+                if is_today:
+                    repo_link = f'<span class="today-badge">TODAY</span> {repo_link}'
+                    date_text = f'<span class="today-date">{formatted_date}</span>'
+                
+                return {
+                    'Repository': repo_link,
+                    'Branch': branch_link,
+                    'SHA': sha_link,
+                    'Message': row['message'],
+                    'Author': row['author'],
+                    'Date': date_text
+                }
+            
+            enhanced_commits = [format_repo_commit_with_highlighting(row) for _, row in df.iterrows()]
+            df_enhanced = pd.DataFrame(enhanced_commits)
+            
+            html_rows = []
+            for _, row in df_enhanced.iterrows():
+                cells = []
+                for col in ['Repository', 'Branch', 'SHA', 'Message', 'Author', 'Date']:
+                    cells.append(f'<td>{row[col]}</td>')
+                html_rows.append(f'<tr>{"".join(cells)}</tr>')
+            
+            header_html = '<tr><th>Repository</th><th>Branch</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr>'
+            table_html = f'<table class="dataframe"><thead>{header_html}</thead><tbody>{"".join(html_rows)}</tbody></table>'
+            st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
     else:
         st.info("No commits found.")
 
@@ -212,13 +454,15 @@ def _display_commits_section(commits_data):
 def main():
     st.set_page_config(page_title="GitHub Dashboard (GraphQL)", page_icon="⚡", layout="wide")
     st.title("⚡ Personal GitHub Dashboard (GraphQL)")
+    
+    # Timezone disclaimer
+    st.markdown("<p style='color: #666; font-size: 0.9em; margin-bottom: 1rem;'>⏰ All times are displayed in your local timezone (EST)</p>", unsafe_allow_html=True)
 
     start_time = time.time()
     commits_data, open_prs_data, merged_prs_data, this_week_commits, this_week_prs = _get_github_data(
         GITHUB_TOKEN, DEBUG_MODE, DEBUG_DATA_FILE, TARGET_ORGANIZATIONS, REPO_FETCH_LIMIT
     )
     end_time = time.time()
-    st.write(f"Total data fetch and processing time: {end_time - start_time:.2f} seconds")
 
     # --- UI Layout ---
     st.markdown("""
@@ -239,12 +483,49 @@ def main():
 
     st.divider()
 
-    # --- Custom CSS for scrollable tables ---
+    # --- Custom CSS for scrollable tables and highlighting ---
     st.markdown("""
     <style>
     .table-container {
         height: 350px;
         overflow-y: auto;
+    }
+    
+    /* Today highlighting styles - only for date text */
+    .today-date {
+        color: #ff6f00 !important;
+        font-weight: 600 !important;
+    }
+    
+    .today-badge {
+        background: linear-gradient(135deg, #ff8f00, #f57c00);
+        color: white;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-size: 9px;
+        font-weight: 600;
+        margin-right: 6px;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+        display: inline-block;
+    }
+    
+    /* Status styling */
+    .status-open {
+        background-color: #e3f2fd;
+        color: #1565c0;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+    
+    .status-merged {
+        background-color: #e8f5e8;
+        color: #2e7d32;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 500;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -258,6 +539,11 @@ def main():
         if st.sidebar.button("Refresh Live Data"):
             st.cache_data.clear()
             st.rerun()
+    
+    # Data fetching status in sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Data Status:**")
+    st.sidebar.text(f"Fetch time: {end_time - start_time:.2f}s")
 
     _display_pull_requests_section(open_prs_data, merged_prs_data)
     _display_commits_section(commits_data)

@@ -232,7 +232,7 @@ def get_bulk_data(token: str, repo_names: list[str], commit_limit: int = 100, pr
                 "repo": repo_name, "repo_url": repo_url,
                 "branch_name": branch_name, "branch_url": branch_url,
                 "sha": commit_node["oid"][:7], "message": commit_node["messageHeadline"],
-                "author": commit_node.get("author", {}).get("name", "n/a"),
+                "author": commit_node.get("author", {}).get("name", "n/a") if commit_node.get("author") else "n/a",
                 "date": commit_node["committedDate"], "url": commit_node["url"]
             })
 
