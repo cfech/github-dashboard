@@ -151,7 +151,7 @@ def get_all_commits_for_repos(token: str, repo_names: List[str], commit_limit: i
     repo_queries = []
     for i, repo_name in enumerate(limited_repos):
         owner, name = repo_name.split('/', 1)
-        commits_per_repo = min(commit_limit // len(limited_repos), 25)  # Increased from 10 to 25
+        commits_per_repo = min(commit_limit // len(limited_repos), 10)
         print(f"  📦 {repo_name}: requesting {commits_per_repo} commits per branch")
         
         repo_queries.append(f"""
@@ -251,32 +251,66 @@ def get_all_commits_for_repos(token: str, repo_names: List[str], commit_limit: i
     return sorted_commits
 
 
-def format_commit_for_stream(commit: Dict[str, Any], is_today: bool) -> str:
-    """Format a single commit for the stream display."""
-    from dashboard_app_graphql import _format_timestamp_to_local
+def _format_timestamp_to_local(utc_timestamp):
+    """Convert UTC timestamp to local timezone formatted string"""
+    utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
+    local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
+    return local_dt.strftime('%Y-%m-%d %I:%M %p EST')
+
+def _get_date_color_and_badge(utc_timestamp):
+    """Get color coding and badge for dates based on recency"""
+    utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
+    local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    week_ago = today - timedelta(days=7)
     
+    item_date = local_dt.date()
+    
+    if item_date == today:
+        return "#9C27B0", "🌟"  # Nice purple for today - shining star
+    elif item_date == yesterday:
+        return "#43A047", "🌙"  # Green for yesterday - recent moon
+    elif item_date >= week_ago:
+        return "#FB8C00", "☄️"   # Orange for this week - comet streak
+    else:
+        return "#FFFFFF", "⭐"   # White for older - distant star
+
+def format_commit_for_stream(commit: Dict[str, Any]) -> str:
+    """Format a single commit for the stream display with color coding."""
     formatted_date = _format_timestamp_to_local(commit["date"])
     date_part = formatted_date.split()[0]  # Just the date part (YYYY-MM-DD)
     time_part = " ".join(formatted_date.split()[1:3])  # Time and AM/PM
     
-    # Truncate long commit messages for right sidebar
-    message = commit["message"]
-    if len(message) > 30:
-        message = message[:27] + "..."
+    # Get color and badge based on date
+    date_color, badge = _get_date_color_and_badge(commit["date"])
     
-    # Simplified display for right sidebar
-    repo_name = commit["repo"].split("/")[-1]
-    branch_name = commit["branch_name"]
-    author = commit["author"]
-    sha = commit["sha"]
+    # Check if this commit is from today for the TODAY badge
+    from datetime import datetime, timezone
+    commit_utc = datetime.fromisoformat(commit["date"].replace('Z', '+00:00'))
+    commit_local = commit_utc.replace(tzinfo=timezone.utc).astimezone()
+    is_today = commit_local.date() == datetime.now().date()
     
-    # Create compact format with date
-    today_badge = "🔥" if is_today else "•"
+    # Don't truncate commit messages - allow them to wrap
+    message = commit.get("message", "No message")
     
-    return f"""{today_badge} **[{repo_name}]({commit["repo_url"]})** `{branch_name}`  
+    # Simplified display for stream - handle missing fields gracefully
+    repo_name = commit.get("repo", "Unknown").split("/")[-1]
+    branch_name = commit.get("branch_name", "main")
+    author = commit.get("author", "Unknown")
+    sha = commit.get("sha", "unknown")
+    repo_url = commit.get("repo_url", "#")
+    commit_url = commit.get("url", "#")
+    
+    # Add TODAY badge if it's from today
+    repo_display = f"**[{repo_name}]({repo_url})**"
+    if is_today:
+        repo_display = f'<span class="today-badge">TODAY</span> {repo_display}'
+    
+    return f"""{badge} {repo_display} `{branch_name}`  
 *{message}*  
-`{sha}` {author}  
-📅 {date_part} {time_part}"""
+**[`{sha}`]({commit_url})** {author}  
+📅 <span style="color: {date_color};">{date_part} {time_part}</span>"""
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -436,11 +470,7 @@ def display_commit_stream(token: str, repo_data_with_dates: list = None, debug_m
         return
     
     # Display stats and controls in a compact layout
-    if debug_mode:
-        st.markdown(f"**{len(commits)} commits** • 🐛 *DEBUG MODE* • ⏱️ *{fetch_time:.1f}s*")
-        st.info("Using cached data from cs_debug.json")
-    else:
-        st.markdown(f"**{len(commits)} commits** • ⏱️ *GitHub API: {fetch_time:.1f}s*")
+    st.markdown(f"**{len(commits)} commits** • ⏱️ *{fetch_time:.1f}s*")
     
     # Add refresh button
     if st.button("🔄 Refresh Stream", key="refresh_stream"):
@@ -467,8 +497,8 @@ def display_commit_stream(token: str, repo_data_with_dates: list = None, debug_m
             is_today = commit_local.date() == today
             
             # Format the commit using the existing function (ensures proper markdown rendering)
-            commit_markdown = format_commit_for_stream(commit, is_today)
-            st.markdown(commit_markdown)
+            commit_markdown = format_commit_for_stream(commit)
+            st.markdown(commit_markdown, unsafe_allow_html=True)
             
             # Add separator except for last item
             if i < len(commits_sorted) - 1:

@@ -189,9 +189,11 @@ class TestCommitStream(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["author"], "Unknown")
 
-    @patch('dashboard_app_graphql._format_timestamp_to_local')
-    def test_format_commit_for_stream_today(self, mock_format):
+    @patch('commit_stream._format_timestamp_to_local')
+    @patch('commit_stream._get_date_color_and_badge')
+    def test_format_commit_for_stream_today(self, mock_color_badge, mock_format):
         mock_format.return_value = "2025-07-20 03:00 PM EST"
+        mock_color_badge.return_value = ("#9C27B0", "🌟")  # Purple color and star emoji for today
         
         commit = {
             "repo": "owner/test-repo",
@@ -205,18 +207,20 @@ class TestCommitStream(unittest.TestCase):
             "url": "https://github.com/owner/test-repo/commit/1234567"
         }
 
-        result = format_commit_for_stream(commit, is_today=True)
+        result = format_commit_for_stream(commit)
         
-        self.assertIn("🔥", result)  # Fire emoji for today
+        self.assertIn("🌟", result)  # Star emoji for today
         self.assertIn("test-repo", result)
         self.assertIn("main", result)
         self.assertIn("Test commit message", result)
         self.assertIn("Test Author", result)
         self.assertIn("2025-07-20 03:00 PM", result)  # Formatted timestamp
 
-    @patch('dashboard_app_graphql._format_timestamp_to_local')
-    def test_format_commit_for_stream_not_today(self, mock_format):
+    @patch('commit_stream._format_timestamp_to_local')
+    @patch('commit_stream._get_date_color_and_badge')
+    def test_format_commit_for_stream_not_today(self, mock_color_badge, mock_format):
         mock_format.return_value = "2025-07-19 02:00 PM EST"
+        mock_color_badge.return_value = ("#FB8C00", "☄️")  # Orange color and comet for this week
         
         commit = {
             "repo": "owner/test-repo",
@@ -230,12 +234,12 @@ class TestCommitStream(unittest.TestCase):
             "url": "https://github.com/owner/test-repo/commit/abcdef1"
         }
 
-        result = format_commit_for_stream(commit, is_today=False)
+        result = format_commit_for_stream(commit)
         
-        self.assertIn("•", result)  # Bullet point for non-today
+        self.assertIn("☄️", result)  # Comet for this week
         self.assertIn("test-repo", result)
         self.assertIn("feature", result)
-        self.assertIn("...", result)  # Truncated message
+        self.assertIn("A very long commit message that should be truncated because it exceeds the character limit", result)  # Full message, no truncation
         self.assertIn("Another Author", result)
         self.assertIn("2025-07-19 02:00 PM", result)  # Formatted timestamp
 
