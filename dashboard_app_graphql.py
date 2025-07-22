@@ -19,10 +19,10 @@ import plotly.graph_objects as go
 
 # Import shared modules and services
 from constants import (
-    DEBUG_MODE, DEBUG_DATA_FILE, DEFAULT_TARGET_ORGANIZATIONS, 
+    DEBUG_MODE, DEBUG_DATA_FILE, DEFAULT_TARGET_ORGANIZATIONS,
     DEFAULT_REPO_FETCH_LIMIT, STREAM_CONTAINER_HEIGHT, TABLE_CONTAINER_HEIGHT,
     ERROR_MESSAGES, INFO_MESSAGES, ENV_VARS, DATE_COLORS, TIMELINE_EMOJIS,
-    PR_STATUS_EMOJIS, CSS_CLASSES, BADGE_COLORS, DEFAULT_DISPLAY_COUNT
+    PR_STATUS_EMOJIS, CSS_CLASSES, BADGE_COLORS, DEFAULT_DISPLAY_COUNT, LOOK_BACK_DAYS
 )
 from utils import (
     format_timestamp_to_local, is_timestamp_today_local, get_date_color_and_emoji,
@@ -212,14 +212,26 @@ def format_pr_for_stream(pr: Dict[str, Any]) -> str:
 📅 <span style="color: {date_color};">{date_part} {time_part}</span>"""
 
 
-def display_pr_stream(all_prs_data: List[Dict], debug_mode: bool = False) -> None:
+def display_pr_stream(all_prs_data: List[Dict], debug_mode: bool = False) -> List[Dict]:
     """Display the PR stream with proper formatting and controls."""
     if not all_prs_data:
         st.info(INFO_MESSAGES['no_prs_this_week'])
-        return
+        return []
+    
+    # Filter PRs to only show those from the LOOK_BACK_DAYS period
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=LOOK_BACK_DAYS)
+    recent_prs = []
+    
+    for pr in all_prs_data:
+        try:
+            pr_date = datetime.fromisoformat(pr["date"].replace('Z', '+00:00'))
+            if pr_date >= cutoff_date:
+                recent_prs.append(pr)
+        except Exception as e:
+            print(f"Error parsing PR date '{pr.get('date', 'unknown')}': {e}")
     
     # Sort PRs by date to ensure newest first
-    prs_sorted = sorted(all_prs_data, key=lambda x: x["date"], reverse=True)
+    prs_sorted = sorted(recent_prs, key=lambda x: x["date"], reverse=True)
     
     # Display header and stats on one line
     debug_text = " *[DEBUG]*" if debug_mode else ""
@@ -240,6 +252,9 @@ def display_pr_stream(all_prs_data: List[Dict], debug_mode: bool = False) -> Non
             # Add separator except for last item
             if i < len(prs_sorted) - 1:
                 st.markdown("---")
+    
+    # Return the PRs data for use in charts
+    return prs_sorted
 
 
 # =============================================================================
@@ -449,8 +464,7 @@ def create_user_stats_table(data: List[Dict], data_type: str = "commits") -> pd.
     user_counts = {}
     for item in data:
         author = item.get('author', 'Unknown')
-        if author != 'Unknown':
-            user_counts[author] = user_counts.get(author, 0) + 1
+        user_counts[author] = user_counts.get(author, 0) + 1
     
     # Convert to DataFrame and sort
     if user_counts:
@@ -481,50 +495,46 @@ def filter_recent_data(data: List[Dict], days_back: int = 14) -> List[Dict]:
     return recent_data
 
 
-def display_user_stats_charts(commits_data: List[Dict], prs_data: List[Dict]) -> None:
-    """Display compact user statistics as bar charts."""
-    st.markdown("**📊 User Activity**")
+def display_commits_chart(commits_data: List[Dict]) -> None:
+    """Display commits user activity as a vertical bar chart."""
+    st.markdown("**📊 Commit Activity**")
     
-    # Use all data from streams (no additional filtering)
+    # Use all data from stream (no additional filtering)
     commits_stats = create_user_stats_table(commits_data, "commits")
-    prs_stats = create_user_stats_table(prs_data, "prs")
     
-    # Display commits chart
     if not commits_stats.empty:
-        st.markdown("**📝 Commits**")
-        # Limit to top 6 and truncate names
-        top_commits = commits_stats.head(6).copy()
+        # Limit to top 8 and truncate names
+        top_commits = commits_stats.head(8).copy()
         top_commits['User'] = top_commits['User'].apply(
-            lambda x: x[:10] + "..." if len(x) > 13 else x
+            lambda x: x[:12] + "..." if len(x) > 15 else x
         )
         
-        # Create horizontal bar chart with Plotly
+        # Create vertical bar chart with Plotly
         fig_commits = go.Figure(go.Bar(
-            x=top_commits['Count'],
-            y=top_commits['User'],
-            orientation='h',
+            x=top_commits['User'],
+            y=top_commits['Count'],
             marker=dict(
                 color='#4A90E2',
                 line=dict(color='#2C5AA0', width=1)
             ),
             text=top_commits['Count'],
-            textposition='outside'
+            textposition='inside',
+            textfont=dict(color='white', size=12)
         ))
         
         fig_commits.update_layout(
-            height=200,
-            margin=dict(l=0, r=0, t=20, b=0),
+            height=280,
+            margin=dict(l=20, r=20, t=40, b=60),
             showlegend=False,
             xaxis=dict(
-                showgrid=True,
-                gridcolor='rgba(128,128,128,0.2)',
-                title='',
-                side='top'
-            ),
-            yaxis=dict(
                 showgrid=False,
                 title='',
-                autorange='reversed'
+                tickangle=45
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)',
+                title='Commits'
             ),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)'
@@ -532,48 +542,49 @@ def display_user_stats_charts(commits_data: List[Dict], prs_data: List[Dict]) ->
         
         st.plotly_chart(fig_commits, use_container_width=True)
     else:
-        st.markdown("**📝 Commits**")
-        st.markdown("*No recent data*")
+        st.markdown("*No recent commit data*")
+
+
+def display_prs_chart(prs_data: List[Dict]) -> None:
+    """Display PRs user activity as a vertical bar chart."""
+    st.markdown("**📊 PR Activity**")
     
-    # Add some spacing
-    st.markdown("")
+    # Use all data from stream (no additional filtering)
+    prs_stats = create_user_stats_table(prs_data, "prs")
     
-    # Display PRs chart
     if not prs_stats.empty:
-        st.markdown("**🔀 Pull Requests**")
-        # Limit to top 6 and truncate names
-        top_prs = prs_stats.head(6).copy()
+        # Limit to top 8 and truncate names
+        top_prs = prs_stats.head(8).copy()
         top_prs['User'] = top_prs['User'].apply(
-            lambda x: x[:10] + "..." if len(x) > 13 else x
+            lambda x: x[:12] + "..." if len(x) > 15 else x
         )
         
-        # Create horizontal bar chart with Plotly
+        # Create vertical bar chart with Plotly
         fig_prs = go.Figure(go.Bar(
-            x=top_prs['Count'],
-            y=top_prs['User'],
-            orientation='h',
+            x=top_prs['User'],
+            y=top_prs['Count'],
             marker=dict(
                 color='#5B9BD5',
                 line=dict(color='#3A7BD5', width=1)
             ),
             text=top_prs['Count'],
-            textposition='outside'
+            textposition='inside',
+            textfont=dict(color='white', size=12)
         ))
         
         fig_prs.update_layout(
-            height=200,
-            margin=dict(l=0, r=0, t=20, b=0),
+            height=280,
+            margin=dict(l=20, r=20, t=40, b=60),
             showlegend=False,
             xaxis=dict(
-                showgrid=True,
-                gridcolor='rgba(128,128,128,0.2)',
-                title='',
-                side='top'
-            ),
-            yaxis=dict(
                 showgrid=False,
                 title='',
-                autorange='reversed'
+                tickangle=45
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(128,128,128,0.2)',
+                title='Pull Requests'
             ),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)'
@@ -581,8 +592,7 @@ def display_user_stats_charts(commits_data: List[Dict], prs_data: List[Dict]) ->
         
         st.plotly_chart(fig_prs, use_container_width=True)
     else:
-        st.markdown("**🔀 Pull Requests**")
-        st.markdown("*No recent data*")
+        st.markdown("*No recent PR data*")
 
 
 # =============================================================================
@@ -758,12 +768,7 @@ def apply_custom_styling() -> None:
     /* Set max width for stream containers */
     .stColumns > div:first-child,
     .stColumns > div:nth-child(2) {{
-        max-width: 400px !important;
-    }}
-    
-    /* Compact stats column */
-    .stColumns > div:last-child {{
-        min-width: 200px !important;
+        max-width: 600px !important;
     }}
     
     /* Reduce divider spacing */
@@ -899,27 +904,19 @@ def main() -> None:
     # Apply custom styling
     apply_custom_styling()
     
-    # Display main content with 3 columns: commits (400px), PRs (400px), stats (remaining)
-    stream_col1, stream_col2, stats_col = st.columns([2, 2, 1])
+    # Display main content with 2 columns: commits (400px), PRs (400px)
+    stream_col1, stream_col2 = st.columns([1, 1])
     
     with stream_col1:
-        display_commit_stream(config['github_token'], repo_data_with_dates, config['debug_mode'])
+        stream_commits = display_commit_stream(config['github_token'], repo_data_with_dates, config['debug_mode'])
+        # Display commits chart below the stream
+        display_commits_chart(stream_commits)
     
     with stream_col2:
         all_prs_data = sorted(open_prs_data + merged_prs_data, key=itemgetter('date'), reverse=True)
-        display_pr_stream(all_prs_data, config['debug_mode'])
-    
-    with stats_col:
-        # Use data from streams (already processed)
-        stream_commits = []
-        if repo_data_with_dates:
-            # Get commits from commit stream (this would be the filtered data)
-            stream_commits = commits_data[:50] if commits_data else []  # Recent commits
-        
-        # Get recent PRs (same as stream)
-        stream_prs = all_prs_data[:50] if all_prs_data else []  # Recent PRs
-        
-        display_user_stats_charts(stream_commits, stream_prs)
+        stream_prs = display_pr_stream(all_prs_data, config['debug_mode'])
+        # Display PRs chart below the stream
+        display_prs_chart(stream_prs)
     
     st.divider()
     
