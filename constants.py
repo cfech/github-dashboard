@@ -13,14 +13,15 @@ from typing import Dict, List
 # =============================================================================
 
 # Debug and file settings
-DEBUG_MODE: bool = True
+DEBUG_MODE: bool = False
 DEBUG_DATA_FILENAME: str = "github_data.json"
 COMMIT_STREAM_DEBUG_FILENAME: str = "cs_debug.json"
 DEBUG_DATA_FILE: str = os.path.join(os.getcwd(), DEBUG_DATA_FILENAME)
 COMMIT_STREAM_DEBUG_FILE: str = os.path.join(os.getcwd(), COMMIT_STREAM_DEBUG_FILENAME)
 
 # Default organization settings
-DEFAULT_TARGET_ORGANIZATIONS: List[str] = ["mcitcentral"]
+_org_env = os.getenv("TARGET_ORGANIZATIONS", "")
+DEFAULT_TARGET_ORGANIZATIONS: List[str] = [org.strip() for org in _org_env.split(",") if org.strip()] if _org_env else []
 
 # Repository and data limits
 DEFAULT_REPO_FETCH_LIMIT: int = 25
@@ -37,7 +38,7 @@ REQUEST_TIMEOUT: int = 30
 GRAPHQL_QUERY_TIMEOUT: int = 45
 
 # GitHub API settings
-GITHUB_API_URL: str = "https://api.github.com/graphql"
+GITHUB_API_URL: str = os.getenv("GITHUB_API_URL", "https://api.github.com/graphql")
 
 # Time periods
 DAYS_IN_WEEK: int = 7
@@ -155,7 +156,8 @@ INFO_MESSAGES: Dict[str, str] = {
 ENV_VARS: Dict[str, str] = {
     "github_token": "GITHUB_TOKEN",
     "repo_fetch_limit": "REPO_FETCH_LIMIT",
-    "debug_mode": "DEBUG_MODE"
+    "debug_mode": "DEBUG_MODE",
+    "target_organizations": "TARGET_ORGANIZATIONS"
 }
 
 # =============================================================================

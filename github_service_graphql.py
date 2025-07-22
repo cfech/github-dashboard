@@ -222,8 +222,10 @@ def determine_organizations_to_fetch(token: str, specific_org_logins: Optional[L
         List of organization logins to fetch repositories from
     """
     if specific_org_logins is not None:
+        # If specific orgs are provided but empty, return empty list (no org fetching)
         return specific_org_logins
     else:
+        # If no specific orgs provided, fetch all user organizations
         return fetch_user_organizations(token)
 
 
