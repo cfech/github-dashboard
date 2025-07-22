@@ -113,11 +113,9 @@ def save_debug_data(debug_file_path: str, commits: List, open_prs: List, merged_
         json.dump(debug_data, f, indent=4)
 
 
-def fetch_live_github_data(config: Dict[str, Any]) -> Tuple[List, List, List, List, float, float]:
-    """Fetch live data from GitHub API."""
-    token = config['github_token']
-    target_organizations = config['target_organizations']
-    repo_fetch_limit = config['repo_fetch_limit']
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def fetch_live_github_data_cached(token: str, target_organizations: List[str], repo_fetch_limit: int) -> Tuple[List, List, List, List, float, float]:
+    """Fetch live data from GitHub API with caching."""
     
     # Fetch repository data with timing
     start_time = time.time()
@@ -161,7 +159,9 @@ def get_github_data(config: Dict[str, Any]) -> Tuple[List, List, List, List, Lis
             return commits, open_prs, merged_prs, this_week_commits, this_week_prs, [], 0.0, 0.0
     
     # Fetch live data
-    commits, open_prs, merged_prs, repo_data_with_dates, repo_fetch_time, bulk_fetch_time = fetch_live_github_data(config)
+    commits, open_prs, merged_prs, repo_data_with_dates, repo_fetch_time, bulk_fetch_time = fetch_live_github_data_cached(
+        token, config['target_organizations'], config['repo_fetch_limit']
+    )
     
     # Process data for this week's activity
     this_week_commits = filter_data_by_timeframe(commits)
@@ -236,10 +236,6 @@ def display_pr_stream(all_prs_data: List[Dict], debug_mode: bool = False) -> Lis
     # Display header and stats on one line
     debug_text = " *[DEBUG]*" if debug_mode else ""
     st.markdown(f"**🔀 Pull Requests{debug_text} • {len(prs_sorted)} PRs**")
-    
-    if st.button("🔄 Refresh PRs", key="refresh_prs"):
-        st.cache_data.clear()
-        st.rerun()
     
     # Create scrollable container
     container = st.container(height=STREAM_CONTAINER_HEIGHT)
@@ -474,25 +470,6 @@ def create_user_stats_table(data: List[Dict], data_type: str = "commits") -> pd.
     return pd.DataFrame()
 
 
-def filter_recent_data(data: List[Dict], days_back: int = 14) -> List[Dict]:
-    """Filter data to only include items from the last N days."""
-    from datetime import datetime, timezone, timedelta
-    
-    if not data:
-        return []
-    
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
-    recent_data = []
-    
-    for item in data:
-        try:
-            item_date = datetime.fromisoformat(item['date'].replace('Z', '+00:00'))
-            if item_date >= cutoff_date:
-                recent_data.append(item)
-        except Exception:
-            continue
-    
-    return recent_data
 
 
 def display_commits_chart(commits_data: List[Dict]) -> None:

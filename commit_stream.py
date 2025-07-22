@@ -560,7 +560,7 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
         token: GitHub personal access token
         repo_data_with_dates: Optional list of (repo_name, push_date) tuples from main dashboard
         debug_mode: Whether to use debug mode
-        
+
     Returns:
         List of commit dictionaries that are being displayed in the stream
     """
@@ -592,7 +592,7 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
         print(f"❌ [COMMIT STREAM] No commits found, showing info message")
         st.info(INFO_MESSAGES['no_commits_this_week'])
         return []
-    
+
     # Filter commits to only show those from the LOOK_BACK_DAYS period
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=LOOK_BACK_DAYS)
     recent_commits = []
@@ -604,19 +604,14 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
                 recent_commits.append(commit)
         except Exception as e:
             print(f"Error parsing commit date '{commit.get('date', 'unknown')}': {e}")
-    
+
     # Sort commits by date to ensure newest first
     commits_sorted = sorted(recent_commits, key=lambda x: x["date"], reverse=True)
-    
+
     # Display header and stats on one line (using filtered count)
     debug_text = " *[DEBUG]*" if debug_mode else ""
     st.markdown(f"**🔄 Commits{debug_text} • {len(commits_sorted)} commits**")
-    
-    # Add refresh button
-    if st.button("🔄 Refresh Stream", key="refresh_stream"):
-        st.cache_data.clear()
-        st.rerun()
-    
+
     print(f"📅 [COMMIT STREAM] Filtered to {len(commits_sorted)} commits from last {LOOK_BACK_DAYS} days")
     if commits_sorted:
         print(f"📅 [COMMIT STREAM] Newest: {commits_sorted[0]['date']} | Oldest: {commits_sorted[-1]['date']}")
@@ -632,6 +627,6 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
             # Add separator except for last item
             if i < len(commits_sorted) - 1:
                 st.markdown("---")
-    
+
     # Return the commits data for use in charts
     return commits_sorted

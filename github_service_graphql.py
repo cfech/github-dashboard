@@ -7,6 +7,7 @@ to fetch repository data, commits, and pull requests.
 
 import os
 import requests
+import streamlit as st
 from operator import itemgetter
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -327,6 +328,7 @@ def get_all_accessible_repository_names(token: str, specific_org_logins: Optiona
     return repository_names
 
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_all_accessible_repository_data(token: str, specific_org_logins: Optional[List[str]] = None) -> List[Tuple[str, str]]:
     """
     Get all accessible repository data including names and push dates.
@@ -521,6 +523,7 @@ def parse_commits_from_repository(repo_data: Dict, repo_name: str, repo_url: str
     return commits
 
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_bulk_repository_data(token: str, repository_names: List[str], 
                            commit_limit: int = 100, pr_limit: int = 20) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
