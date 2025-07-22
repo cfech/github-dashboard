@@ -552,7 +552,7 @@ def get_commit_stream_data_from_repos(token: str, repo_data_with_dates: List[Tup
 # =============================================================================
 
 def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[str, str]]] = None, 
-                         debug_mode: bool = False) -> None:
+                         debug_mode: bool = False) -> List[Dict[str, Any]]:
     """
     Display the commit stream with proper formatting and controls.
     
@@ -560,10 +560,13 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
         token: GitHub personal access token
         repo_data_with_dates: Optional list of (repo_name, push_date) tuples from main dashboard
         debug_mode: Whether to use debug mode
+        
+    Returns:
+        List of commit dictionaries that are being displayed in the stream
     """
     if not token and not debug_mode:
         st.warning("GitHub token required for commit stream")
-        return
+        return []
     
     # Get commit data with timing
     fetch_start_time = time.time()
@@ -588,7 +591,7 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
     if not commits:
         print(f"❌ [COMMIT STREAM] No commits found, showing info message")
         st.info(INFO_MESSAGES['no_commits_this_week'])
-        return
+        return []
     
     # Display header and stats on one line
     debug_text = " *[DEBUG]*" if debug_mode else ""
@@ -617,3 +620,6 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
             # Add separator except for last item
             if i < len(commits_sorted) - 1:
                 st.markdown("---")
+    
+    # Return the commits data for use in charts
+    return commits_sorted
