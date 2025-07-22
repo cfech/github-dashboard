@@ -48,6 +48,59 @@ def execute_graphql_query(token: str, query: str, variables: Optional[Dict] = No
 
 
 # =============================================================================
+# User Information Functions
+# =============================================================================
+
+def fetch_user_info(token: str) -> Dict[str, Any]:
+    """
+    Fetch authenticated user information from GitHub.
+    
+    Args:
+        token: GitHub personal access token
+        
+    Returns:
+        Dictionary containing user information
+    """
+    query = """
+    query {
+        viewer {
+            login
+            name
+            email
+            bio
+            company
+            location
+            avatarUrl
+            url
+            createdAt
+            followers {
+                totalCount
+            }
+            following {
+                totalCount
+            }
+            repositories(first: 1) {
+                totalCount
+            }
+            contributionsCollection {
+                totalCommitContributions
+                totalPullRequestContributions
+                totalIssueContributions
+                totalRepositoryContributions
+            }
+        }
+    }
+    """
+    
+    try:
+        result = execute_graphql_query(token, query)
+        return result.get("data", {}).get("viewer", {})
+    except Exception as e:
+        print(f"Error fetching user info: {e}")
+        return {}
+
+
+# =============================================================================
 # Repository Discovery Functions
 # =============================================================================
 

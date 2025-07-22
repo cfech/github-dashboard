@@ -65,7 +65,7 @@ The application follows a modular architecture with clear separation of concerns
 
 4. **Run the application**
    ```bash
-   streamlit run dashboard_app_graphql.py
+   pienv run streamlit run dashboard_app_graphql.py
    ```
 
 5. **Access the dashboard**

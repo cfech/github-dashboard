@@ -26,7 +26,7 @@ from utils import (
     format_timestamp_to_local, is_timestamp_today_local, get_date_color_and_emoji,
     get_repository_display_name, safe_get_commit_field
 )
-from github_service_graphql import get_bulk_data, get_all_accessible_repo_data
+from github_service_graphql import get_bulk_data, get_all_accessible_repo_data, fetch_user_info
 from commit_stream import display_commit_stream
 
 load_dotenv()
@@ -557,6 +557,19 @@ def apply_custom_styling() -> None:
         display: none !important;    
     }}
     
+    /* Hide sidebar collapse button */
+    div[data-testid="stSidebarCollapseButton"] {{
+        display: none !important;
+    }}
+    
+    button[data-testid="stBaseButton-headerNoPadding"] {{
+        display: none !important;
+    }}
+    
+    button[kind="headerNoPadding"] {{
+        display: none !important;
+    }}
+    
     /* Reduce all gaps and spacing */
     .element-container {{
         margin-bottom: 0.2rem !important;
@@ -604,10 +617,55 @@ def apply_custom_styling() -> None:
 # Sidebar Functions  
 # =============================================================================
 
+def display_user_info(user_info: Dict[str, Any]) -> None:
+    """Display user information at the top of the sidebar."""
+    if not user_info:
+        return
+    
+    st.sidebar.markdown("### 👤 User Info")
+    
+    # Basic user info
+    name = user_info.get("name") or user_info.get("login", "Unknown")
+    login = user_info.get("login", "")
+    if name != login and login:
+        st.sidebar.markdown(f"**{name}** (@{login})")
+    else:
+        st.sidebar.markdown(f"**{name}**")
+    
+    # Company and location
+    company = user_info.get("company")
+    location = user_info.get("location")
+    if company or location:
+        info_parts = []
+        if company:
+            info_parts.append(f"🏢 {company}")
+        if location:
+            info_parts.append(f"📍 {location}")
+        st.sidebar.markdown(" • ".join(info_parts))
+    
+    # Stats in compact format
+    repos = user_info.get("repositories", {}).get("totalCount", 0)
+    followers = user_info.get("followers", {}).get("totalCount", 0)
+    following = user_info.get("following", {}).get("totalCount", 0)
+    
+    contributions = user_info.get("contributionsCollection", {})
+    commits = contributions.get("totalCommitContributions", 0)
+    prs = contributions.get("totalPullRequestContributions", 0)
+    
+    # Display stats compactly
+    st.sidebar.markdown(f"📦 **{repos}** repos • 👥 **{followers}** followers")
+    st.sidebar.markdown(f"📝 **{commits}** commits • 🔀 **{prs}** PRs")
+
+
 def display_sidebar(config: Dict[str, Any], fetch_time: float, commits_count: int = 0, prs_count: int = 0, 
-                   repo_fetch_time: float = 0.0, bulk_fetch_time: float = 0.0) -> None:
+                   repo_fetch_time: float = 0.0, bulk_fetch_time: float = 0.0, user_info: Dict[str, Any] = None) -> None:
     """Display the application sidebar with settings and status."""
-    st.sidebar.title("Settings")
+    # Display user info at the top
+    if user_info:
+        display_user_info(user_info)
+        st.sidebar.markdown("---")
+    
+    st.sidebar.markdown("### ⚙️ Settings")
     
     # Debug mode status
     if config['debug_mode']:
@@ -622,9 +680,9 @@ def display_sidebar(config: Dict[str, Any], fetch_time: float, commits_count: in
             st.cache_data.clear()
             st.rerun()
     
-    # Performance metrics
+    # Data loading times at bottom
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**Performance:**")
+    st.sidebar.markdown("**⏱️ Performance:**")
     st.sidebar.text(f"Total fetch: {fetch_time:.2f}s")
     
     # Show detailed timing only when not in debug mode and times are available
@@ -633,11 +691,6 @@ def display_sidebar(config: Dict[str, Any], fetch_time: float, commits_count: in
             st.sidebar.text(f"Repo data: {repo_fetch_time:.2f}s")
         if bulk_fetch_time > 0:
             st.sidebar.text(f"Bulk data: {bulk_fetch_time:.2f}s")
-    
-    if commits_count > 0:
-        st.sidebar.text(f"Commits: {commits_count}")
-    if prs_count > 0:
-        st.sidebar.text(f"PRs: {prs_count}")
 
 
 # =============================================================================
@@ -664,6 +717,14 @@ def main() -> None:
     
     end_time = time.time()
     fetch_time = end_time - start_time
+    
+    # Fetch user information
+    user_info = {}
+    if config['github_token'] and not config['debug_mode']:
+        try:
+            user_info = fetch_user_info(config['github_token'])
+        except Exception as e:
+            print(f"Error fetching user info: {e}")
     
     # Prepare repository data for commit stream
     repo_data_with_dates = prepare_repo_data_for_commit_stream(
@@ -692,7 +753,7 @@ def main() -> None:
     # Display sidebar with metrics
     commits_count = len(commits_data) if commits_data else 0
     prs_count = len(open_prs_data) + len(merged_prs_data) if open_prs_data and merged_prs_data else 0
-    display_sidebar(config, fetch_time, commits_count, prs_count, repo_fetch_time, bulk_fetch_time)
+    display_sidebar(config, fetch_time, commits_count, prs_count, repo_fetch_time, bulk_fetch_time, user_info)
 
 
 if __name__ == "__main__":
