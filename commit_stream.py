@@ -593,19 +593,31 @@ def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[
         st.info(INFO_MESSAGES['no_commits_this_week'])
         return []
     
-    # Display header and stats on one line
+    # Filter commits to only show those from the LOOK_BACK_DAYS period
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=LOOK_BACK_DAYS)
+    recent_commits = []
+    
+    for commit in commits:
+        try:
+            commit_date = datetime.fromisoformat(commit["date"].replace('Z', '+00:00'))
+            if commit_date >= cutoff_date:
+                recent_commits.append(commit)
+        except Exception as e:
+            print(f"Error parsing commit date '{commit.get('date', 'unknown')}': {e}")
+    
+    # Sort commits by date to ensure newest first
+    commits_sorted = sorted(recent_commits, key=lambda x: x["date"], reverse=True)
+    
+    # Display header and stats on one line (using filtered count)
     debug_text = " *[DEBUG]*" if debug_mode else ""
-    st.markdown(f"**🔄 Commits{debug_text} • {len(commits)} commits**")
+    st.markdown(f"**🔄 Commits{debug_text} • {len(commits_sorted)} commits**")
     
     # Add refresh button
     if st.button("🔄 Refresh Stream", key="refresh_stream"):
         st.cache_data.clear()
         st.rerun()
     
-    # Sort commits by date to ensure newest first
-    commits_sorted = sorted(commits, key=lambda x: x["date"], reverse=True)
-    
-    print(f"📅 [COMMIT STREAM] Displaying {len(commits_sorted)} commits sorted by date")
+    print(f"📅 [COMMIT STREAM] Filtered to {len(commits_sorted)} commits from last {LOOK_BACK_DAYS} days")
     if commits_sorted:
         print(f"📅 [COMMIT STREAM] Newest: {commits_sorted[0]['date']} | Oldest: {commits_sorted[-1]['date']}")
     

@@ -464,8 +464,7 @@ def create_user_stats_table(data: List[Dict], data_type: str = "commits") -> pd.
     user_counts = {}
     for item in data:
         author = item.get('author', 'Unknown')
-        if author != 'Unknown':
-            user_counts[author] = user_counts.get(author, 0) + 1
+        user_counts[author] = user_counts.get(author, 0) + 1
     
     # Convert to DataFrame and sort
     if user_counts:
