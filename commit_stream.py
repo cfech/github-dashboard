@@ -19,7 +19,7 @@ from constants import (
     GITHUB_API_URL, REQUEST_TIMEOUT, GRAPHQL_QUERY_TIMEOUT, COMMIT_STREAM_DEBUG_FILE,
     COMMIT_STREAM_REPO_LIMIT, MAX_REPOS_FOR_COMMIT_STREAM, COMMITS_PER_REPO_DEFAULT,
     STREAM_CONTAINER_HEIGHT, ERROR_MESSAGES, INFO_MESSAGES, CSS_CLASSES,
-    DAYS_IN_WEEK
+    DAYS_IN_WEEK, LOOK_BACK_DAYS
 )
 from utils import (
     format_timestamp_to_local, is_timestamp_today_local, get_date_color_and_emoji,
@@ -67,7 +67,7 @@ def run_graphql_query_with_timeout(token: str, query: str, variables: Optional[D
 # =============================================================================
 
 def filter_recently_active_repos(repo_data_with_dates: List[Tuple[str, str]], 
-                                days_back: int = DAYS_IN_WEEK) -> List[str]:
+                                days_back: int = LOOK_BACK_DAYS) -> List[str]:
     """
     Filter repositories to get those that have been pushed to recently.
     

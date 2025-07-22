@@ -18,6 +18,7 @@ DEBUG_DATA_FILENAME: str = "github_data.json"
 COMMIT_STREAM_DEBUG_FILENAME: str = "cs_debug.json"
 DEBUG_DATA_FILE: str = os.path.join(os.getcwd(), DEBUG_DATA_FILENAME)
 COMMIT_STREAM_DEBUG_FILE: str = os.path.join(os.getcwd(), COMMIT_STREAM_DEBUG_FILENAME)
+LOOK_BACK_DAYS: int = 14
 
 # Default organization settings
 _org_env = os.getenv("TARGET_ORGANIZATIONS", "")
