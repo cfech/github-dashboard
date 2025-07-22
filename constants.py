@@ -13,7 +13,7 @@ from typing import Dict, List
 # =============================================================================
 
 # Debug and file settings
-DEBUG_MODE: bool = True
+DEBUG_MODE: bool = False
 DEBUG_DATA_FILENAME: str = "github_data.json"
 COMMIT_STREAM_DEBUG_FILENAME: str = "cs_debug.json"
 DEBUG_DATA_FILE: str = os.path.join(os.getcwd(), DEBUG_DATA_FILENAME)

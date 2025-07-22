@@ -709,22 +709,25 @@ def main() -> None:
     
     # Get configuration and fetch data
     config = get_application_config()
-    start_time = time.time()
     
-    (commits_data, open_prs_data, merged_prs_data, 
-     this_week_commits, this_week_prs, repo_data_from_fetch, 
-     repo_fetch_time, bulk_fetch_time) = get_github_data(config)
+    # Show loading spinner while fetching data
+    with st.spinner('Loading GitHub data...'):
+        start_time = time.time()
+        
+        (commits_data, open_prs_data, merged_prs_data, 
+         this_week_commits, this_week_prs, repo_data_from_fetch, 
+         repo_fetch_time, bulk_fetch_time) = get_github_data(config)
     
-    end_time = time.time()
-    fetch_time = end_time - start_time
-    
-    # Fetch user information
-    user_info = {}
-    if config['github_token'] and not config['debug_mode']:
-        try:
-            user_info = fetch_user_info(config['github_token'])
-        except Exception as e:
-            print(f"Error fetching user info: {e}")
+        end_time = time.time()
+        fetch_time = end_time - start_time
+        
+        # Fetch user information
+        user_info = {}
+        if config['github_token'] and not config['debug_mode']:
+            try:
+                user_info = fetch_user_info(config['github_token'])
+            except Exception as e:
+                print(f"Error fetching user info: {e}")
     
     # Prepare repository data for commit stream
     repo_data_with_dates = prepare_repo_data_for_commit_stream(
