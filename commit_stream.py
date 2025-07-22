@@ -1,24 +1,57 @@
+"""
+Commit Stream Module
+
+This module handles fetching and displaying a live stream of commits from GitHub repositories.
+It provides functionality for getting recent commits across multiple repositories and branches.
+"""
+
 import os
 import requests
 import streamlit as st
 import time
+import json
 from datetime import datetime, timezone, timedelta
 from operator import itemgetter
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
-GRAPHQL_URL = os.getenv("GITHUB_GRAPHQL_URL", "https://api.github.com/graphql")
-REQUEST_TIMEOUT = 30  # seconds
+# Import shared modules
+from constants import (
+    GITHUB_API_URL, REQUEST_TIMEOUT, GRAPHQL_QUERY_TIMEOUT, COMMIT_STREAM_DEBUG_FILE,
+    COMMIT_STREAM_REPO_LIMIT, MAX_REPOS_FOR_COMMIT_STREAM, COMMITS_PER_REPO_DEFAULT,
+    STREAM_CONTAINER_HEIGHT, ERROR_MESSAGES, INFO_MESSAGES, CSS_CLASSES,
+    DAYS_IN_WEEK
+)
+from utils import (
+    format_timestamp_to_local, is_timestamp_today_local, get_date_color_and_emoji,
+    get_repository_display_name, safe_get_commit_field, calculate_days_ago
+)
 
 
-def _run_graphql_query_with_timeout(token: str, query: str, variables: dict = None, timeout: int = REQUEST_TIMEOUT):
-    """Run a GraphQL query with timeout handling."""
+# =============================================================================
+# GraphQL Query Functions
+# =============================================================================
+
+def run_graphql_query_with_timeout(token: str, query: str, variables: Optional[Dict] = None, 
+                                  timeout: int = REQUEST_TIMEOUT) -> Optional[Dict]:
+    """
+    Execute a GraphQL query with timeout handling and error management.
+    
+    Args:
+        token: GitHub personal access token
+        query: GraphQL query string
+        variables: Optional query variables
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Query result dictionary or None if failed
+    """
     headers = {"Authorization": f"Bearer {token}"}
     payload = {"query": query}
     if variables:
         payload["variables"] = variables
     
     try:
-        response = requests.post(GRAPHQL_URL, json=payload, headers=headers, timeout=timeout)
+        response = requests.post(GITHUB_API_URL, json=payload, headers=headers, timeout=timeout)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.Timeout:
@@ -29,16 +62,26 @@ def _run_graphql_query_with_timeout(token: str, query: str, variables: dict = No
         return None
 
 
-def get_recently_active_repos_from_existing(repo_data_with_dates: List[tuple], days_back: int = 7) -> List[str]:
-    """Filter repos to get those that have been pushed to in the last week (EST timezone)."""
+# =============================================================================
+# Repository Activity Functions
+# =============================================================================
+
+def filter_recently_active_repos(repo_data_with_dates: List[Tuple[str, str]], 
+                                days_back: int = DAYS_IN_WEEK) -> List[str]:
+    """
+    Filter repositories to get those that have been pushed to recently.
+    
+    Args:
+        repo_data_with_dates: List of (repo_name, push_date) tuples
+        days_back: Number of days to look back for activity
+        
+    Returns:
+        List of repository names that have been active recently
+    """
     print(f"🔍 [COMMIT STREAM] Filtering {len(repo_data_with_dates)} repos for recent activity (past {days_back} days)")
     
-    from datetime import datetime, timezone, timedelta
-    
-    # Calculate cutoff date (1 week ago in EST)
     now_utc = datetime.now(timezone.utc)
     cutoff_date = now_utc - timedelta(days=days_back)
-    
     recent_repos = []
     
     for repo_name, pushed_at in repo_data_with_dates:
@@ -46,20 +89,19 @@ def get_recently_active_repos_from_existing(repo_data_with_dates: List[tuple], d
             continue
             
         try:
-            # Parse the push date and convert to UTC
             push_date = datetime.fromisoformat(pushed_at.replace('Z', '+00:00'))
             
-            # Check if pushed in the last week
             if push_date >= cutoff_date:
                 recent_repos.append(repo_name)
-                days_ago = (now_utc - push_date).days
+                days_ago = calculate_days_ago(pushed_at)
                 hours_ago = (now_utc - push_date).total_seconds() / 3600
+                
                 if hours_ago < 24:
                     print(f"  ✅ {repo_name}: pushed {hours_ago:.1f} hours ago")
                 else:
                     print(f"  ✅ {repo_name}: pushed {days_ago} days ago")
             else:
-                days_ago = (now_utc - push_date).days
+                days_ago = calculate_days_ago(pushed_at)
                 print(f"  ❌ {repo_name}: pushed {days_ago} days ago (too old)")
                 
         except Exception as e:
@@ -71,8 +113,20 @@ def get_recently_active_repos_from_existing(repo_data_with_dates: List[tuple], d
     
     return recent_repos
 
-def get_recently_active_repos(token: str, days_back: int = 7, limit: int = 30) -> List[str]:
-    """Get repositories that have been updated in the past week."""
+
+def get_recently_active_repos_via_api(token: str, days_back: int = DAYS_IN_WEEK, 
+                                     limit: int = COMMIT_STREAM_REPO_LIMIT) -> List[str]:
+    """
+    Get repositories that have been updated recently via direct GraphQL API call.
+    
+    Args:
+        token: GitHub personal access token
+        days_back: Number of days to look back
+        limit: Maximum number of repositories to fetch
+        
+    Returns:
+        List of repository names that have been active recently
+    """
     print(f"🔍 [COMMIT STREAM] Fetching recently active repos (past {days_back} days, limit {limit})")
     
     if not token:
@@ -104,7 +158,7 @@ def get_recently_active_repos(token: str, days_back: int = 7, limit: int = 30) -
     """
     
     variables = {"since": since_date, "first": limit}
-    result = _run_graphql_query_with_timeout(token, query, variables)
+    result = run_graphql_query_with_timeout(token, query, variables)
     
     if not result or "data" not in result:
         print("❌ [COMMIT STREAM] No data returned from GraphQL query")
@@ -113,17 +167,17 @@ def get_recently_active_repos(token: str, days_back: int = 7, limit: int = 30) -
     repos = result.get("data", {}).get("viewer", {}).get("repositories", {}).get("nodes", [])
     print(f"📊 [COMMIT STREAM] Got {len(repos)} total repos from API")
     
-    # Filter repos that were actually updated in the past week
+    # Filter repos that were actually updated in the timeframe
     active_repos = []
-    week_ago = datetime.now(timezone.utc) - timedelta(days=days_back)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
     
     for repo in repos:
         if repo.get("pushedAt"):
             pushed_at = datetime.fromisoformat(repo["pushedAt"].replace('Z', '+00:00'))
-            days_since = (datetime.now(timezone.utc) - pushed_at).days
+            days_since = calculate_days_ago(repo["pushedAt"])
             print(f"  📦 {repo['nameWithOwner']}: pushed {days_since} days ago ({repo['pushedAt']})")
             
-            if pushed_at >= week_ago:
+            if pushed_at >= cutoff_date:
                 active_repos.append(repo["nameWithOwner"])
                 print(f"    ✅ Added to active repos")
             else:
@@ -135,23 +189,30 @@ def get_recently_active_repos(token: str, days_back: int = 7, limit: int = 30) -
     return active_repos
 
 
-def get_all_commits_for_repos(token: str, repo_names: List[str], commit_limit: int = 100) -> List[Dict[str, Any]]:
-    """Get all commits from all branches for specified repositories."""
-    print(f"🔍 [COMMIT STREAM] Fetching commits for {len(repo_names)} repos, limit {commit_limit}")
+# =============================================================================
+# Commit Fetching Functions
+# =============================================================================
+
+def build_commits_query(repo_names: List[str], commits_per_repo: int = COMMITS_PER_REPO_DEFAULT) -> str:
+    """
+    Build a GraphQL query to fetch commits from multiple repositories.
     
-    if not token or not repo_names:
-        print("❌ [COMMIT STREAM] No token or no repos provided")
-        return []
-    
-    # Limit to 5 repos to avoid timeout
-    limited_repos = repo_names[:5]
-    print(f"📋 [COMMIT STREAM] Limited to {len(limited_repos)} repos: {limited_repos}")
-    
-    # Build query for multiple repositories and all their branches
+    Args:
+        repo_names: List of repository names in "owner/name" format
+        commits_per_repo: Number of commits to fetch per repository
+        
+    Returns:
+        GraphQL query string
+    """
     repo_queries = []
-    for i, repo_name in enumerate(limited_repos):
-        owner, name = repo_name.split('/', 1)
-        commits_per_repo = min(commit_limit // len(limited_repos), 10)
+    
+    for i, repo_name in enumerate(repo_names):
+        try:
+            owner, name = repo_name.split('/', 1)
+        except ValueError:
+            print(f"⚠️  [COMMIT STREAM] Invalid repo name format: {repo_name}")
+            continue
+            
         print(f"  📦 {repo_name}: requesting {commits_per_repo} commits per branch")
         
         repo_queries.append(f"""
@@ -182,22 +243,23 @@ def get_all_commits_for_repos(token: str, repo_names: List[str], commit_limit: i
         }}
         """)
     
-    query = f"""
+    return f"""
     query {{
       {' '.join(repo_queries)}
     }}
     """
+
+
+def parse_commits_from_query_result(result: Dict) -> List[Dict[str, Any]]:
+    """
+    Parse commit data from GraphQL query result.
     
-    print(f"🔄 [COMMIT STREAM] Executing GraphQL query with 45s timeout...")
-    start_time = time.time()
-    result = _run_graphql_query_with_timeout(token, query, timeout=45)  # Longer timeout for complex query
-    query_time = time.time() - start_time
-    print(f"⏱️  [COMMIT STREAM] GraphQL query completed in {query_time:.2f}s")
-    
-    if not result or "data" not in result:
-        print("❌ [COMMIT STREAM] No data returned from commits query")
-        return []
-    
+    Args:
+        result: GraphQL query result dictionary
+        
+    Returns:
+        List of commit dictionaries with standardized fields
+    """
     all_commits = []
     
     for repo_key, repo_data in result.get("data", {}).items():
@@ -229,8 +291,8 @@ def get_all_commits_for_repos(token: str, repo_names: List[str], commit_limit: i
                         "branch_name": branch_name,
                         "branch_url": branch_url,
                         "sha": commit["oid"][:7],
-                        "message": commit["messageHeadline"],
-                        "author": commit.get("author", {}).get("name", "Unknown") if commit.get("author") else "Unknown",
+                        "message": safe_get_commit_field(commit, "messageHeadline", "No message"),
+                        "author": safe_get_commit_field(commit.get("author", {}), "name", "Unknown"),
                         "date": commit["committedDate"],
                         "url": commit["url"]
                     }
@@ -238,9 +300,53 @@ def get_all_commits_for_repos(token: str, repo_names: List[str], commit_limit: i
             else:
                 print(f"    🌿 {branch_name}: No commit history available")
     
+    return all_commits
+
+
+def fetch_commits_for_repositories(token: str, repo_names: List[str], 
+                                  commit_limit: int = 100) -> List[Dict[str, Any]]:
+    """
+    Fetch all commits from specified repositories using GraphQL.
+    
+    Args:
+        token: GitHub personal access token
+        repo_names: List of repository names
+        commit_limit: Total commit limit across all repositories
+        
+    Returns:
+        List of commit dictionaries sorted by date (newest first)
+    """
+    print(f"🔍 [COMMIT STREAM] Fetching commits for {len(repo_names)} repos, limit {commit_limit}")
+    
+    if not token or not repo_names:
+        print("❌ [COMMIT STREAM] No token or no repos provided")
+        return []
+    
+    # Limit repositories to avoid timeout
+    limited_repos = repo_names[:MAX_REPOS_FOR_COMMIT_STREAM]
+    print(f"📋 [COMMIT STREAM] Limited to {len(limited_repos)} repos: {limited_repos}")
+    
+    # Calculate commits per repository
+    commits_per_repo = min(commit_limit // len(limited_repos), COMMITS_PER_REPO_DEFAULT)
+    
+    # Build and execute query
+    query = build_commits_query(limited_repos, commits_per_repo)
+    
+    print(f"🔄 [COMMIT STREAM] Executing GraphQL query with {GRAPHQL_QUERY_TIMEOUT}s timeout...")
+    start_time = time.time()
+    result = run_graphql_query_with_timeout(token, query, timeout=GRAPHQL_QUERY_TIMEOUT)
+    query_time = time.time() - start_time
+    print(f"⏱️  [COMMIT STREAM] GraphQL query completed in {query_time:.2f}s")
+    
+    if not result or "data" not in result:
+        print("❌ [COMMIT STREAM] No data returned from commits query")
+        return []
+    
+    # Parse commits from result
+    all_commits = parse_commits_from_query_result(result)
     print(f"📊 [COMMIT STREAM] Collected {len(all_commits)} total commits from all branches")
     
-    # Sort by date (most recent first) - show ALL commits, no limit
+    # Sort by date (most recent first)
     sorted_commits = sorted(all_commits, key=lambda x: x["date"], reverse=True)
     
     print(f"🎯 [COMMIT STREAM] Returning ALL {len(sorted_commits)} commits (no limit)")
@@ -251,61 +357,74 @@ def get_all_commits_for_repos(token: str, repo_names: List[str], commit_limit: i
     return sorted_commits
 
 
-def _format_timestamp_to_local(utc_timestamp):
-    """Convert UTC timestamp to local timezone formatted string"""
-    utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
-    local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
-    return local_dt.strftime('%Y-%m-%d %I:%M %p EST')
+# =============================================================================
+# Debug Data Management
+# =============================================================================
 
-def _get_date_color_and_badge(utc_timestamp):
-    """Get color coding and badge for dates based on recency"""
-    utc_dt = datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
-    local_dt = utc_dt.replace(tzinfo=timezone.utc).astimezone()
-    today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
-    week_ago = today - timedelta(days=7)
-    
-    item_date = local_dt.date()
-    
-    if item_date == today:
-        return "#9C27B0", "🌟"  # Nice purple for today - shining star
-    elif item_date == yesterday:
-        return "#43A047", "🌙"  # Green for yesterday - recent moon
-    elif item_date >= week_ago:
-        return "#FB8C00", "☄️"   # Orange for this week - comet streak
-    else:
-        return "#FFFFFF", "⭐"   # White for older - distant star
+def load_debug_commits(debug_file_path: str) -> List[Dict[str, Any]]:
+    """Load commit data from debug file."""
+    if not os.path.exists(debug_file_path):
+        return []
+        
+    try:
+        with open(debug_file_path, 'r') as f:
+            debug_data = json.load(f)
+        return debug_data.get("commits", [])
+    except Exception as e:
+        print(f"❌ [COMMIT STREAM] Error reading debug file: {str(e)}")
+        return []
+
+
+def save_debug_commits(debug_file_path: str, commits: List[Dict[str, Any]]) -> None:
+    """Save commit data to debug file."""
+    try:
+        save_start = time.time()
+        debug_data = {"commits": commits}
+        with open(debug_file_path, 'w') as f:
+            json.dump(debug_data, f, indent=4)
+        save_time = time.time() - save_start
+        print(f"💾 [COMMIT STREAM] Saved {len(commits)} commits to {debug_file_path} in {save_time:.3f}s")
+    except Exception as e:
+        print(f"❌ [COMMIT STREAM] Error saving debug file: {str(e)}")
+
+
+# =============================================================================
+# Commit Stream Formatting
+# =============================================================================
 
 def format_commit_for_stream(commit: Dict[str, Any]) -> str:
-    """Format a single commit for the stream display with color coding."""
-    formatted_date = _format_timestamp_to_local(commit["date"])
+    """
+    Format a single commit for stream display with color coding and TODAY badge.
+    
+    Args:
+        commit: Commit data dictionary
+        
+    Returns:
+        Formatted markdown string for display
+    """
+    formatted_date = format_timestamp_to_local(commit["date"])
     date_part = formatted_date.split()[0]  # Just the date part (YYYY-MM-DD)
     time_part = " ".join(formatted_date.split()[1:3])  # Time and AM/PM
     
-    # Get color and badge based on date
-    date_color, badge = _get_date_color_and_badge(commit["date"])
+    # Get color and emoji based on date
+    date_color, badge = get_date_color_and_emoji(commit["date"])
     
     # Check if this commit is from today for the TODAY badge
-    from datetime import datetime, timezone
-    commit_utc = datetime.fromisoformat(commit["date"].replace('Z', '+00:00'))
-    commit_local = commit_utc.replace(tzinfo=timezone.utc).astimezone()
-    is_today = commit_local.date() == datetime.now().date()
+    is_today = is_timestamp_today_local(commit["date"])
     
-    # Don't truncate commit messages - allow them to wrap
-    message = commit.get("message", "No message")
-    
-    # Simplified display for stream - handle missing fields gracefully
-    repo_name = commit.get("repo", "Unknown").split("/")[-1]
-    branch_name = commit.get("branch_name", "main")
-    author = commit.get("author", "Unknown")
-    sha = commit.get("sha", "unknown")
-    repo_url = commit.get("repo_url", "#")
-    commit_url = commit.get("url", "#")
+    # Extract commit details safely
+    message = safe_get_commit_field(commit, "message", "No message")
+    repo_name = get_repository_display_name(safe_get_commit_field(commit, "repo", "Unknown"))
+    branch_name = safe_get_commit_field(commit, "branch_name", "main")
+    author = safe_get_commit_field(commit, "author", "Unknown")
+    sha = safe_get_commit_field(commit, "sha", "unknown")
+    repo_url = safe_get_commit_field(commit, "repo_url", "#")
+    commit_url = safe_get_commit_field(commit, "url", "#")
     
     # Add TODAY badge if it's from today
     repo_display = f"**[{repo_name}]({repo_url})**"
     if is_today:
-        repo_display = f'<span class="today-badge">TODAY</span> {repo_display}'
+        repo_display = f'<span class="{CSS_CLASSES["today_badge"]}">TODAY</span> {repo_display}'
     
     return f"""{badge} {repo_display} `{branch_name}`  
 *{message}*  
@@ -313,52 +432,50 @@ def format_commit_for_stream(commit: Dict[str, Any]) -> str:
 📅 <span style="color: {date_color};">{date_part} {time_part}</span>"""
 
 
+# =============================================================================
+# Main Data Fetching Functions
+# =============================================================================
+
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_commit_stream_data(token: str, days_back: int = 7, commit_limit: int = 100, debug_mode: bool = False) -> List[Dict[str, Any]]:
-    """Get commit stream data with caching."""
-    import os
-    import json
+def get_commit_stream_data_standalone(token: str, days_back: int = DAYS_IN_WEEK, 
+                                     commit_limit: int = 100, debug_mode: bool = False) -> List[Dict[str, Any]]:
+    """
+    Get commit stream data independently (without repo data from main dashboard).
     
-    cs_debug_file = os.getcwd() + "/cs_debug.json"
-    
-    # Check if debug mode is enabled and file exists
-    if debug_mode and os.path.exists(cs_debug_file):
+    Args:
+        token: GitHub personal access token
+        days_back: Number of days to look back for activity
+        commit_limit: Maximum number of commits to fetch
+        debug_mode: Whether to use debug mode
+        
+    Returns:
+        List of commit dictionaries
+    """
+    # Try debug mode first
+    if debug_mode:
         debug_start_time = time.time()
-        print(f"🔄 [COMMIT STREAM] DEBUG MODE: Reading from {cs_debug_file}")
-        try:
-            with open(cs_debug_file, 'r') as f:
-                debug_data = json.load(f)
-            commits = debug_data.get("commits", [])
+        print(f"🔄 [COMMIT STREAM] DEBUG MODE: Reading from {COMMIT_STREAM_DEBUG_FILE}")
+        commits = load_debug_commits(COMMIT_STREAM_DEBUG_FILE)
+        if commits:
             debug_time = time.time() - debug_start_time
             print(f"📊 [COMMIT STREAM] DEBUG MODE: Loaded {len(commits)} commits in {debug_time:.3f}s from debug file")
             return commits
-        except Exception as e:
-            print(f"❌ [COMMIT STREAM] DEBUG MODE: Error reading debug file: {str(e)}")
-            # Fall through to live data fetching
     
     if not token:
         return []
     
     try:
         # Get recently active repositories
-        active_repos = get_recently_active_repos(token, days_back)
+        active_repos = get_recently_active_repos_via_api(token, days_back)
         if not active_repos:
             return []
         
         # Get all commits from these repositories
-        commits = get_all_commits_for_repos(token, active_repos, commit_limit)
+        commits = fetch_commits_for_repositories(token, active_repos, commit_limit)
         
-        # Save to debug file if not in debug mode (for future debug use)
+        # Save to debug file if not in debug mode
         if not debug_mode:
-            try:
-                save_start = time.time()
-                debug_data = {"commits": commits}
-                with open(cs_debug_file, 'w') as f:
-                    json.dump(debug_data, f, indent=4)
-                save_time = time.time() - save_start
-                print(f"💾 [COMMIT STREAM] Saved {len(commits)} commits to {cs_debug_file} in {save_time:.3f}s")
-            except Exception as e:
-                print(f"❌ [COMMIT STREAM] Error saving debug file: {str(e)}")
+            save_debug_commits(COMMIT_STREAM_DEBUG_FILE, commits)
         
         return commits
         
@@ -368,27 +485,29 @@ def get_commit_stream_data(token: str, days_back: int = 7, commit_limit: int = 1
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_commit_stream_data_from_repos(token: str, repo_data_with_dates: List[tuple], commit_limit: int = 100, debug_mode: bool = False) -> List[Dict[str, Any]]:
-    """Get commit stream data using repo data with push dates."""
-    import os
-    import json
+def get_commit_stream_data_from_repos(token: str, repo_data_with_dates: List[Tuple[str, str]], 
+                                     commit_limit: int = 100, debug_mode: bool = False) -> List[Dict[str, Any]]:
+    """
+    Get commit stream data using repository data with push dates from main dashboard.
     
-    cs_debug_file = os.getcwd() + "/cs_debug.json"
-    
-    # Check if debug mode is enabled and file exists
-    if debug_mode and os.path.exists(cs_debug_file):
+    Args:
+        token: GitHub personal access token
+        repo_data_with_dates: List of (repo_name, push_date) tuples
+        commit_limit: Maximum number of commits to fetch
+        debug_mode: Whether to use debug mode
+        
+    Returns:
+        List of commit dictionaries
+    """
+    # Try debug mode first
+    if debug_mode:
         debug_start_time = time.time()
-        print(f"🔄 [COMMIT STREAM] DEBUG MODE: Reading from {cs_debug_file}")
-        try:
-            with open(cs_debug_file, 'r') as f:
-                debug_data = json.load(f)
-            commits = debug_data.get("commits", [])
+        print(f"🔄 [COMMIT STREAM] DEBUG MODE: Reading from {COMMIT_STREAM_DEBUG_FILE}")
+        commits = load_debug_commits(COMMIT_STREAM_DEBUG_FILE)
+        if commits:
             debug_time = time.time() - debug_start_time
             print(f"📊 [COMMIT STREAM] DEBUG MODE: Loaded {len(commits)} commits in {debug_time:.3f}s from debug file")
             return commits
-        except Exception as e:
-            print(f"❌ [COMMIT STREAM] DEBUG MODE: Error reading debug file: {str(e)}")
-            # Fall through to live data fetching
     
     print(f"🔄 [COMMIT STREAM] Starting commit stream data fetch with repo push date filtering")
     start_time = time.time()
@@ -402,30 +521,22 @@ def get_commit_stream_data_from_repos(token: str, repo_data_with_dates: List[tup
         return []
     
     try:
-        # Filter repos to get only those pushed to in the last week (EST)
-        active_repos = get_recently_active_repos_from_existing(repo_data_with_dates)
+        # Filter repos to get only those pushed to recently
+        active_repos = filter_recently_active_repos(repo_data_with_dates)
         if not active_repos:
             print("❌ [COMMIT STREAM] No repos found that were pushed to in the last week")
             return []
         
         # Get all commits from these recently active repositories
-        commits = get_all_commits_for_repos(token, active_repos, commit_limit)
+        commits = fetch_commits_for_repositories(token, active_repos, commit_limit)
         
         total_time = time.time() - start_time
         print(f"⏱️  [COMMIT STREAM] LIVE DATA: GitHub GraphQL API queries completed in {total_time:.2f}s")
         print(f"📊 [COMMIT STREAM] LIVE DATA: Final result: {len(commits)} commits from {len(active_repos)} recently active repos")
         
-        # Save to debug file if not in debug mode (for future debug use)
+        # Save to debug file if not in debug mode
         if not debug_mode:
-            try:
-                save_start = time.time()
-                debug_data = {"commits": commits}
-                with open(cs_debug_file, 'w') as f:
-                    json.dump(debug_data, f, indent=4)
-                save_time = time.time() - save_start
-                print(f"💾 [COMMIT STREAM] Saved {len(commits)} commits to {cs_debug_file} in {save_time:.3f}s")
-            except Exception as e:
-                print(f"❌ [COMMIT STREAM] Error saving debug file: {str(e)}")
+            save_debug_commits(COMMIT_STREAM_DEBUG_FILE, commits)
         
         return commits
         
@@ -436,19 +547,25 @@ def get_commit_stream_data_from_repos(token: str, repo_data_with_dates: List[tup
         return []
 
 
-def display_commit_stream(token: str, repo_data_with_dates: list = None, debug_mode: bool = False):
-    """Display the commit stream on the right side of the screen."""
-    st.subheader("🔄 Live Commit Stream")
-    if debug_mode:
-        st.markdown("*Recent commits from all branches* **[DEBUG MODE]**")
-    else:
-        st.markdown("*Recent commits from all branches*")
+# =============================================================================
+# Display Functions
+# =============================================================================
+
+def display_commit_stream(token: str, repo_data_with_dates: Optional[List[Tuple[str, str]]] = None, 
+                         debug_mode: bool = False) -> None:
+    """
+    Display the commit stream with proper formatting and controls.
     
+    Args:
+        token: GitHub personal access token
+        repo_data_with_dates: Optional list of (repo_name, push_date) tuples from main dashboard
+        debug_mode: Whether to use debug mode
+    """
     if not token and not debug_mode:
         st.warning("GitHub token required for commit stream")
         return
     
-    # Get commit data with timing - use repo data with push dates
+    # Get commit data with timing
     fetch_start_time = time.time()
     
     if repo_data_with_dates:
@@ -456,47 +573,44 @@ def display_commit_stream(token: str, repo_data_with_dates: list = None, debug_m
         commits = get_commit_stream_data_from_repos(token, repo_data_with_dates, debug_mode=debug_mode)
     else:
         print(f"🔄 [COMMIT STREAM] No repo data provided, fetching independently")
-        commits = get_commit_stream_data(token, debug_mode=debug_mode)
+        commits = get_commit_stream_data_standalone(token, debug_mode=debug_mode)
     
     fetch_time = time.time() - fetch_start_time
     
     print(f"🔄 [COMMIT STREAM] Retrieved {len(commits)} commits for display")
     if commits:
-        print(f"🔄 [COMMIT STREAM] First commit sample: {commits[0].get('repo', 'unknown')}/{commits[0].get('branch_name', 'unknown')} - {commits[0].get('message', 'no message')[:30]}...")
+        first_commit = commits[0]
+        repo_name = safe_get_commit_field(first_commit, 'repo', 'unknown')
+        branch_name = safe_get_commit_field(first_commit, 'branch_name', 'unknown')
+        message = safe_get_commit_field(first_commit, 'message', 'no message')
+        print(f"🔄 [COMMIT STREAM] First commit sample: {repo_name}/{branch_name} - {message[:30]}...")
     
     if not commits:
         print(f"❌ [COMMIT STREAM] No commits found, showing info message")
-        st.info("No recent commits found")
+        st.info(INFO_MESSAGES['no_commits_this_week'])
         return
     
-    # Display stats and controls in a compact layout
-    st.markdown(f"**{len(commits)} commits** • ⏱️ *{fetch_time:.1f}s*")
+    # Display header and stats on one line
+    debug_text = " *[DEBUG]*" if debug_mode else ""
+    st.markdown(f"**🔄 Commits{debug_text} • {len(commits)} commits**")
     
     # Add refresh button
     if st.button("🔄 Refresh Stream", key="refresh_stream"):
         st.cache_data.clear()
         st.rerun()
     
-    # Sort commits by date to ensure newest first (in case they're not already sorted)
+    # Sort commits by date to ensure newest first
     commits_sorted = sorted(commits, key=lambda x: x["date"], reverse=True)
-    today = datetime.now().date()
     
     print(f"📅 [COMMIT STREAM] Displaying {len(commits_sorted)} commits sorted by date")
     if commits_sorted:
         print(f"📅 [COMMIT STREAM] Newest: {commits_sorted[0]['date']} | Oldest: {commits_sorted[-1]['date']}")
     
-    # Create a scrollable container using st.container with 60vh height
-    container = st.container(height=800)
+    # Create scrollable container
+    container = st.container(height=STREAM_CONTAINER_HEIGHT)
     
     with container:
-        # Display ALL commits using Streamlit's native markdown (ensures proper rendering)
         for i, commit in enumerate(commits_sorted):
-            # Check if commit is from today
-            commit_utc = datetime.fromisoformat(commit['date'].replace('Z', '+00:00'))
-            commit_local = commit_utc.replace(tzinfo=timezone.utc).astimezone()
-            is_today = commit_local.date() == today
-            
-            # Format the commit using the existing function (ensures proper markdown rendering)
             commit_markdown = format_commit_for_stream(commit)
             st.markdown(commit_markdown, unsafe_allow_html=True)
             

@@ -1,90 +1,252 @@
-# GitHub Dashboard (GraphQL)
+# GitHub Dashboard
 
-This project implements a GitHub dashboard application that leverages the GitHub GraphQL API to fetch and display repository information. It provides a user-friendly interface to visualize data related to your GitHub repositories.
+A modern, real-time GitHub dashboard built with Streamlit that provides comprehensive visibility into your GitHub repositories, commits, and pull requests across multiple organizations.
 
-## Technologies Used
+## Overview
 
-This application is built with:
+This dashboard aggregates data from your accessible GitHub repositories and presents it in a clean, interactive interface. It features live activity streams, detailed repository analytics, and performance metrics to help you stay on top of your development workflow.
 
-*   **Python 3.x**: The core programming language.
-*   **Streamlit**: For creating the interactive web dashboard.
-*   **Pandas**: For data manipulation and analysis.
-*   **python-dotenv**: For managing environment variables.
-*   **Requests**: For making HTTP requests to the GitHub GraphQL API.
+### Key Features
 
-## How to Run
+- **Live Activity Streams**: Real-time feeds of commits and pull requests
+- **Multi-Organization Support**: Aggregate data across multiple GitHub organizations
+- **Advanced Filtering**: Filter by repository, time periods, and activity types
+- **Performance Monitoring**: Built-in timing metrics and caching
+- **Debug Mode**: Local data caching for development and testing
+- **Responsive Design**: Optimized for various screen sizes
 
-Follow these steps to set up and run the application:
+## Technology Stack
+
+- **Frontend**: Streamlit (Python web framework)
+- **API Integration**: GitHub GraphQL API v4
+- **Data Processing**: Pandas for data manipulation
+- **Styling**: Custom CSS with Streamlit components
+- **Caching**: Streamlit's built-in caching system
+- **Environment Management**: Python-dotenv for configuration
+
+### Architecture
+
+The application follows a modular architecture with clear separation of concerns:
+
+- `dashboard_app_graphql.py` - Main Streamlit application and UI components
+- `github_service_graphql.py` - GitHub API service layer with GraphQL queries
+- `commit_stream.py` - Real-time commit stream functionality  
+- `constants.py` - Centralized configuration and constants
+- `utils.py` - Shared utility functions
+- `tests/` - Test suite for all components
+
+## Installation & Setup
 
 ### Prerequisites
 
-*   **Python 3.x**: Ensure you have Python installed on your system.
-*   **Pipenv**: This project uses Pipenv for dependency management. If you don't have it installed, you can install it using pip:
-    ```bash
-    pip install pipenv
-    ```
+- Python 3.8+
+- GitHub Personal Access Token
+- Internet connection for GitHub API access
 
-### Setup and Execution
+### Quick Start
 
-1.  **Navigate to the `graphql` directory**:
-    ```bash
-    cd /Users/connorfech/Desktop/code/github-dashboard/
-    ```
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd github-dashboard
+   ```
 
-2.  **Install Dependencies**:
-    Install the project dependencies using Pipenv. This will create a virtual environment and install all necessary packages.
-    ```bash
-    pipenv install
-    ```
+2. **Install dependencies**
+   ```bash
+   pipenv install
+   ```
 
-3.  **Activate the Virtual Environment**:
-    Enter the Pipenv shell to activate the virtual environment.
-    ```bash
-    pipenv shell
-    ```
+3. **Set up environment variables**
+   ```bash
+   GITHUB_TOKEN="your token"
+   GITHUB_API_URL="your github url if not using default"
+   TARGET_ORGANIZATIONS="org1,org2,org3"
+   ```
 
-4.  **Run the Application**:
-    Once the virtual environment is active, you can run the Streamlit application:
-    ```bash
-    streamlit run dashboard_app_graphql.py
-    ```
-    This command will open the dashboard in your web browser.
+4. **Run the application**
+   ```bash
+   streamlit run dashboard_app_graphql.py
+   ```
 
-## Environment Variables
+5. **Access the dashboard**
+   Open your browser to `http://localhost:8501`
 
-Before running the application, you need to set up a `.env` file in the `graphql` directory with the following environment variables:
+## Configuration
 
-*   `GITHUB_TOKEN`: Your personal GitHub access token. This token is required to authenticate with the GitHub GraphQL API and fetch repository data.
+### Environment Variables
 
-    **How to get a GitHub Token:**
-    1.  Go to your GitHub settings.
-    2.  Navigate to "Developer settings" -> "Personal access tokens" -> "Tokens (classic)".
-    3.  Click "Generate new token" (or "Generate new token (classic)").
-    4.  Give your token a descriptive name (e.g., "GitHub Dashboard Token").
-    5.  Select the necessary scopes. For this application, you will likely need at least `repo` scope to access repository information.
-    6.  Click "Generate token" and copy the token.
+#### Required Variables
 
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `GITHUB_TOKEN` | GitHub Personal Access Token with repo access | `ghp_xxxxxxxxxxxxxxxxxxxx` |
 
+#### Optional Variables
 
-*   `GITHUB_GRAPHQL_URL` (Optional): The URL for the GitHub GraphQL API. Defaults to `https://api.github.com/graphql`. You typically won't need to change this unless you are using a GitHub Enterprise instance with a different API endpoint. Example: `GITHUB_GRAPHQL_URL=https://github.yourcompany.com/api/graphql`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REPO_FETCH_LIMIT` | `25` | Maximum number of repositories to fetch |
+| `DEBUG_MODE` | `False` | Enable debug mode for local development |
+| `TARGET_ORGANIZATIONS` | `""` | Comma-separated list of GitHub organizations to fetch (empty = user repos only) |
+| `GITHUB_API_URL` | `https://api.github.com/graphql` | GitHub GraphQL API endpoint |
 
-    **Example `.env` file:**
-    ```
-    GITHUB_TOKEN=your_github_personal_access_token_here
-    # GITHUB_GRAPHQL_URL=https://api.github.com/graphql
-    ```
-    Replace `your_github_personal_access_token_here` with the actual token you generated.
+### GitHub Token Setup
 
-## Internal Configuration (Code-based)
+1. Go to GitHub Settings → Developer settings → Personal access tokens
+2. Generate a new token with the following scopes:
+   - `repo` - Full control of private repositories
+   - `read:org` - Read org and team membership
+   - `read:user` - Read user profile data
 
-The following variables are configured directly within the `dashboard_app_graphql.py` file. To change these, you will need to modify the source code.
+3. Add the token to your `.env` file:
+   ```bash
+   GITHUB_TOKEN=your_token_here
+   ```
 
-*   `DEBUG_DATA_FILE`: The name of the JSON file used to store cached GitHub data when `DEBUG_MODE` is enabled. Default is `github_data.json`.
+### Configuration Options
 
-* `TARGET_ORGANIZATIONS` (Optional): A comma-separated string of GitHub organization logins (e.g., `org1,org2`). If set, the application will primarily fetch repositories from these organizations. If omitted, it will attempt to fetch repositories from all organizations the authenticated user is a member of, in addition to personal repositories.
+#### Debug Mode
 
-*   `REPO_FETCH_LIMIT` (Optional): An integer specifying the maximum number of repositories to fetch data for. This can be useful for limiting API calls during development or for focusing on a subset of repositories. For example, `REPO_FETCH_LIMIT=50`.
+When `DEBUG_MODE=True` in `constants.py`, the application:
+- Uses cached data from local JSON files
+- Displays "[DEBUG]" indicators in the UI
+- Shows debug file status in sidebar
+- Skips live API calls for faster development
 
-*   `DEBUG_MODE` (Optional): Set to `True` to enable debug mode. In debug mode, the application will attempt to load data from a local JSON file (`github_data.json`) if it exists, and save fetched data to this file. Example: `DEBUG_MODE=True`.
+#### Organization Targeting
 
-*   `st.cache_data(ttl=...)`: The `ttl` (time-to-live) parameter for the Streamlit data cache. This determines how long fetched GitHub data is cached in memory before being re-fetched. The default is `3600` seconds (1 hour). You can find this in the `@st.cache_data` decorator in `dashboard_app_graphql.py`.
+Configure which organizations to fetch using the `TARGET_ORGANIZATIONS` environment variable:
+
+```bash
+# Fetch from specific organizations
+TARGET_ORGANIZATIONS="your-org-1,your-org-2,your-org-3"
+
+# Fetch only user repositories (no organizations)
+TARGET_ORGANIZATIONS=""
+
+# If not set, will fetch from all user organizations
+# TARGET_ORGANIZATIONS not set
+```
+
+#### Performance Tuning
+
+Adjust these constants in `constants.py` for optimal performance:
+
+```python
+# Repository limits
+DEFAULT_REPO_FETCH_LIMIT: int = 25
+COMMIT_STREAM_REPO_LIMIT: int = 30
+MAX_REPOS_FOR_COMMIT_STREAM: int = 5
+
+# API timeouts
+REQUEST_TIMEOUT: int = 30
+GRAPHQL_QUERY_TIMEOUT: int = 45
+
+# UI settings
+STREAM_CONTAINER_HEIGHT: int = 900
+```
+
+### Advanced Configuration
+
+#### Custom Styling
+
+The application includes extensive CSS customization options in `constants.py`:
+
+- `DATE_COLORS` - Timeline color scheme
+- `BADGE_COLORS` - Status badge colors  
+- `CSS_CLASSES` - CSS class mappings
+
+#### Data Caching
+
+Two types of caching are available:
+
+1. **Streamlit Cache**: Automatic 5-minute TTL for API calls
+2. **Debug Files**: Local JSON storage for development
+   - `github_data.json` - Main dashboard data
+   - `cs_debug.json` - Commit stream data
+
+## Usage
+
+### Dashboard Sections
+
+1. **Live Activity Streams** - Real-time commits and PR feeds
+2. **Pull Requests** - Detailed PR tables with filtering
+3. **Commits** - Repository commit history with branch information
+4. **Sidebar** - Performance metrics and configuration status
+
+### Keyboard Shortcuts
+
+- `R` - Refresh data
+- `S` - Toggle sidebar
+- `F11` - Full screen mode
+
+### Filtering & Search
+
+- Use repository dropdowns to filter by specific repos
+- Adjust display limits with sliders
+- Sort by date, author, or repository
+- Filter by time periods (today, this week, etc.)
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests with unittest
+python -m unittest discover tests/ -v
+
+# Run specific test file
+python -m unittest tests.test_github_service_graphql -v
+
+# Run specific test class
+python -m unittest tests.test_github_service_graphql.TestGitHubService -v
+
+# Run with pattern matching
+python -m unittest discover -s tests/ -p "test_*.py" -v
+```
+
+### Development Mode
+
+1. Set `DEBUG_MODE = True` in `constants.py`
+2. Ensure debug JSON files exist with sample data
+3. Run the application - it will use cached data instead of API calls
+
+### Contributing
+
+1. Follow the existing code structure and naming conventions
+2. Add tests for new functionality
+3. Update constants in `constants.py` rather than hardcoding values
+4. Use the shared utility functions in `utils.py`
+
+## Troubleshooting
+
+### Common Issues
+
+**"No token" error**
+- Ensure `GITHUB_TOKEN` is set in your environment
+- Verify the token has correct permissions
+
+**Empty data display**  
+- Check if your token has access to the target organizations
+- Verify the organizations exist in `DEFAULT_TARGET_ORGANIZATIONS`
+
+**Slow performance**
+- Reduce `REPO_FETCH_LIMIT` in environment variables
+- Enable debug mode for development
+- Check network connectivity
+
+**GraphQL errors**
+- Verify token permissions include `repo` and `read:org`
+- Check API rate limits (5000 requests/hour)
+
+### Debug Information
+
+Enable debug mode and check the sidebar for:
+- Performance timing
+- Data load status  
+- Cache utilization
+- API call metrics
+
+## License
+
+This project is provided as-is for educational and development purposes.
